@@ -1,0 +1,125 @@
+  <!-- one cached path per glyph; every preview instance is a <use> of these -->
+  <svg id="glyphDefs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="glyphDefsInner"></defs></svg>
+
+  <div id="app">
+    <header class="topbar">
+      <div class="wordmark">LIQUID<span>.</span>FONT</div>
+      <div class="topbar-divider"></div>
+      <input id="fontNameInput" class="fontname-input" value="Ooze" spellcheck="false" />
+      <div class="topbar-spacer"></div>
+      <div class="swatch-row" id="swatchRow"></div>
+      <div class="topbar-divider"></div>
+      <div class="topbar-meta" id="glyphCountMeta">42 glyphs</div>
+    </header>
+
+    <main class="workspace">
+      <aside class="editor-panel">
+        <div class="panel-label">Glyph editor — <span id="letterBadge">A</span></div>
+        <div class="editor-canvas-wrap">
+          <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div class="readout" id="editorReadout">Click a node, then drag to move it — or drag its orange rim to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
+
+        <div class="node-inspector" id="nodeInspector">
+          <div class="node-field">
+            <label>X</label>
+            <input type="number" id="nodeX" step="0.5" disabled />
+          </div>
+          <div class="node-field">
+            <label>Y</label>
+            <input type="number" id="nodeY" step="0.5" disabled />
+          </div>
+          <div class="node-field">
+            <label>R</label>
+            <input type="number" id="nodeR" step="0.5" min="2" disabled />
+          </div>
+          <button class="mini-btn" id="btnAddNode" title="Insert a new node next to this one, for finer control over the curve" disabled>+ Node</button>
+          <button class="mini-btn" id="btnDelNode" title="Remove this node" disabled>&minus; Node</button>
+        </div>
+
+        <div class="toggle-grid">
+          <div class="pill-btn" id="btnResetGlyph" title="Revert this glyph to its original nodes">Reset Glyph</div>
+          <div class="pill-btn" id="btnUndo" title="Undo last edit">Undo</div>
+        </div>
+
+        <div class="editor-hint">
+          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its orange rim to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. MELT controls how much neighbouring blobs fuse.
+        </div>
+      </aside>
+
+      <section class="specimen-panel">
+        <div class="specimen-scroll" id="specimenScroll">
+          <div id="testerList"></div>
+          <div class="add-block-row">
+            <button class="mini-btn" id="btnAddBlock">+ Add preview block</button>
+          </div>
+          <div class="glyphset">
+            <div class="glyphset-title">Character set</div>
+            <div id="glyphSet"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="control-bar">
+      <div class="slider-group">
+        <label>Mass <b id="valMass"></b></label>
+        <input type="range" id="sldMass" min="0.6" max="1.5" step="0.01" />
+      </div>
+      <div class="slider-group">
+        <label>Melt <b id="valMelt"></b></label>
+        <input type="range" id="sldMelt" min="0" max="40" step="1" />
+      </div>
+      <div class="slider-group">
+        <label>Tension <b id="valTension"></b></label>
+        <input type="range" id="sldTension" min="-12" max="8" step="0.5" />
+      </div>
+      <div class="slider-group">
+        <label>Wobble <b id="valWobble"></b></label>
+        <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
+      </div>
+      <div class="slider-group">
+        <label>Smooth <b id="valSmooth"></b></label>
+        <input type="range" id="sldSmooth" min="0" max="4" step="1" />
+      </div>
+
+      <div class="control-divider"></div>
+
+      <div class="edit-mode-group">
+        <label>Edit mode</label>
+        <div class="edit-toggle-row">
+          <button class="edit-toggle" id="btnGlobalEdit" title="Apply node edits to every glyph sharing this node index">Global</button>
+          <button class="edit-toggle" id="btnMirror" title="Mirror node edits across the vertical axis">Mirror</button>
+        </div>
+      </div>
+
+      <div class="control-divider"></div>
+
+      <div class="select-group">
+        <label>Flow state</label>
+        <select id="presetSelect">
+          <option value="liquid" selected>Liquid</option>
+          <option value="mercury">Mercury</option>
+          <option value="acid">Acid</option>
+          <option value="molten">Molten</option>
+          <option value="bubble">Bubble</option>
+          <option value="goo">Goo</option>
+        </select>
+      </div>
+
+      <div class="select-group">
+        <label>Flow <b id="seedLabel" class="seed-label">#5</b></label>
+        <button class="text-btn reseed" id="btnReseed">Restir &#8635;</button>
+      </div>
+
+      <div class="control-spacer"></div>
+
+      <div class="export-group">
+        <button class="export-btn secondary" id="btnExportSvg">SVG</button>
+        <button class="export-btn secondary" id="btnExportPng">PNG</button>
+        <button class="export-btn" id="btnExportOtf">Export OTF</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>

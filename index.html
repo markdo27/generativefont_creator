@@ -1,0 +1,1606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Liquid.Font — liquid type generator</title>
+<style>
+:root {
+  --bg: #000000;
+  --surface: #0b0b0b;
+  --panel: #101010;
+  --fg: #ffffff;
+  --muted: #7d7d7d;
+  --line: #262626;
+  --line-soft: #1a1a1a;
+  --accent: #ff5000;
+  --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: 'Neue Haas Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+
+/* ------------------------------------------------------------------ topbar */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  height: 52px; min-height: 52px; padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.wordmark {
+  font-family: var(--mono); font-weight: 700; font-size: 13px;
+  letter-spacing: 0.2em; text-transform: uppercase; white-space: nowrap;
+}
+.wordmark span { color: var(--accent); }
+.topbar-divider { width: 1px; align-self: stretch; background: var(--line); margin: 12px 0; }
+.fontname-input {
+  font-family: var(--sans); font-weight: 600; font-size: 14px;
+  border: none; outline: none; background: transparent; color: var(--fg);
+  padding: 6px 8px; border-radius: 3px; min-width: 110px;
+}
+.fontname-input:hover, .fontname-input:focus { background: #1b1b1b; }
+.topbar-spacer { flex: 1; }
+.topbar-meta {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  letter-spacing: 0.06em; white-space: nowrap; text-transform: uppercase;
+}
+.swatch-row { display: flex; gap: 6px; align-items: center; }
+.swatch {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 1px solid #3a3a3a; cursor: pointer; padding: 0;
+}
+.swatch.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --------------------------------------------------------------- workspace */
+.workspace { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+
+.editor-panel {
+  width: 288px; min-width: 288px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 14px; display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto;
+}
+.panel-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.editor-canvas-wrap {
+  border: 1px solid var(--line); background: #070707;
+  aspect-ratio: 1 / 1; border-radius: 2px; overflow: hidden;
+}
+.editor-canvas-wrap svg { width: 100%; height: 100%; display: block; touch-action: none; }
+
+.node-handle { fill: #0b0b0b; stroke: #d8d8d8; stroke-width: 1.6; cursor: grab; }
+.node-handle:hover { fill: var(--accent); stroke: var(--accent); }
+.node-handle.active { fill: var(--accent); stroke: #ffb08a; stroke-width: 1.8; }
+.rim-grip { fill: #0b0b0b; stroke: var(--accent); stroke-width: 1.8; cursor: ew-resize; }
+.rim-grip:hover { fill: var(--accent); }
+
+.readout { font-family: var(--mono); font-size: 10px; color: var(--muted); min-height: 26px; line-height: 1.4; }
+
+.panel-label #letterBadge { color: var(--accent); font-weight: 700; }
+
+.node-inspector {
+  display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap;
+  border: 1px solid var(--line); background: var(--surface);
+  padding: 9px; border-radius: 2px;
+}
+.node-field { display: flex; flex-direction: column; gap: 4px; width: 52px; }
+.node-field label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.node-field input {
+  font-family: var(--mono); font-size: 11px; color: var(--fg);
+  background: var(--panel); border: 1px solid var(--line);
+  padding: 5px 6px; width: 100%; border-radius: 2px;
+}
+.node-field input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+.node-field input:disabled { opacity: 0.35; }
+.node-inspector .mini-btn { flex: 1; min-width: 58px; text-align: center; }
+.node-inspector .mini-btn[disabled] { opacity: 0.3; cursor: default; }
+.node-inspector .mini-btn[disabled]:hover { color: var(--muted); border-color: var(--line); }
+
+.toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pill-btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg);
+  padding: 9px 6px; cursor: pointer; text-align: center; border-radius: 2px;
+  transition: background 0.08s, color 0.08s, border-color 0.08s; user-select: none;
+}
+.pill-btn:hover { border-color: #444; background: #171717; }
+.pill-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.pill-btn[disabled] { opacity: 0.3; cursor: default; }
+.pill-btn[disabled]:hover { background: var(--surface); border-color: var(--line); }
+
+.editor-hint {
+  font-family: var(--mono); font-size: 10px; line-height: 1.55; color: var(--muted);
+  border-top: 1px solid var(--line-soft); padding-top: 11px; margin-top: auto;
+}
+
+/* ---------------------------------------------------------------- specimen */
+.specimen-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.specimen-scroll { flex: 1; overflow-y: auto; }
+
+.tester {
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 34px 0;
+}
+.tester.paper { background: #fff; }
+.tester.paper .tester-head { border-color: #e2e2e2; }
+.tester.paper .tester-name,
+.tester.paper .tester-ctrl b { color: #000; }
+.tester.paper .tester-ctrl { color: #666; }
+.tester.paper .tester-text { color: #000; }
+
+.tester-head {
+  display: flex; align-items: center; gap: 20px;
+  padding: 11px 26px; border-bottom: 1px solid var(--line-soft);
+  flex-wrap: wrap;
+}
+.tester-name {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--fg); white-space: nowrap;
+}
+.tester-ctrl {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.04em; white-space: nowrap;
+}
+.tester-ctrl b { color: var(--fg); font-weight: 600; min-width: 44px; display: inline-block; }
+.tester-ctrl input[type=range] { width: 82px; }
+.tester-spacer { flex: 1; }
+.mini-btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; background: transparent; color: var(--muted);
+  border: 1px solid var(--line); padding: 5px 9px; cursor: pointer; border-radius: 2px;
+}
+.mini-btn:hover { color: var(--fg); border-color: #444; }
+.mini-btn.on { color: #000; background: var(--accent); border-color: var(--accent); }
+
+.tester-body { padding: 26px 26px 0 26px; }
+.tester-text { cursor: text; min-height: 1em; }
+.tester-text .word { display: inline-block; white-space: nowrap; }
+.tester-text svg { display: inline-block; overflow: visible; }
+.tester-edit {
+  width: 100%; background: #141414; color: var(--fg);
+  border: 1px solid var(--accent); border-radius: 2px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  padding: 12px; resize: vertical; min-height: 90px; outline: none;
+}
+.tester.paper .tester-edit { background: #f4f4f4; color: #000; }
+
+.add-block-row { padding: 22px 26px 40px; }
+
+/* --------------------------------------------------------------- glyph set */
+.glyphset { padding: 30px 26px 60px; border-top: 1px solid var(--line); }
+.glyphset-title {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 22px;
+}
+.glyphset-group { margin-bottom: 26px; }
+.glyphset-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+}
+.glyphset-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px; }
+.glyph-cell {
+  cursor: pointer; padding: 6px; border: 1px solid transparent; border-radius: 2px;
+  transition: background 0.08s, border-color 0.08s;
+}
+.glyph-cell:hover { background: #171717; border-color: #333; }
+.glyph-cell.selected { border-color: var(--accent); background: #1a0d06; }
+.glyph-cell svg { display: block; overflow: visible; }
+
+/* ---------------------------------------------------------------- controls */
+.control-bar {
+  border-top: 1px solid var(--line); background: var(--surface);
+  padding: 12px 18px; display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;
+}
+.slider-group { display: flex; flex-direction: column; gap: 5px; width: 88px; }
+.slider-group label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+  display: flex; justify-content: space-between;
+}
+.slider-group label b { color: var(--fg); font-weight: 600; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 1px; background: #3a3a3a; outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; border: none;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; border: none;
+}
+
+.control-divider { width: 1px; align-self: stretch; background: var(--line); }
+
+.edit-mode-group { display: flex; flex-direction: column; gap: 5px; }
+.edit-mode-group label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.edit-toggle-row { display: flex; gap: 6px; }
+.edit-toggle {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg);
+  padding: 7px 10px; cursor: pointer; border-radius: 2px; white-space: nowrap;
+  transition: background 0.08s, color 0.08s, border-color 0.08s;
+}
+.edit-toggle:hover { border-color: #444; background: #171717; }
+.edit-toggle.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+.align-group { display: flex; gap: 4px; }
+.align-btn {
+  width: 32px; height: 32px; border: 1px solid var(--line);
+  background: var(--surface); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.align-btn svg { width: 17px; height: 13px; }
+.align-btn svg line { stroke: #999; stroke-width: 1.6; }
+.align-btn.active { background: var(--accent); border-color: var(--accent); }
+.align-btn.active svg line { stroke: #000; }
+
+.select-group { display: flex; flex-direction: column; gap: 5px; }
+.select-group label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.seed-label { font-family: var(--mono); color: var(--fg); font-weight: 600; }
+select {
+  font-family: var(--sans); font-size: 12.5px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  padding: 7px 9px; cursor: pointer; min-width: 104px;
+}
+.text-btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg);
+  padding: 8px 11px; cursor: pointer; white-space: nowrap;
+}
+.text-btn:hover { border-color: var(--accent); color: var(--accent); }
+.text-btn.reseed { min-width: 104px; font-weight: 600; }
+
+.control-spacer { flex: 1; }
+.export-group { display: flex; gap: 7px; align-items: flex-end; }
+.export-btn {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  border: 1px solid var(--accent); background: var(--accent); color: #000;
+  padding: 9px 15px; cursor: pointer; white-space: nowrap; text-transform: uppercase;
+}
+.export-btn:hover { background: #ff6a26; border-color: #ff6a26; }
+.export-btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+.export-btn.secondary:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+.export-btn[disabled] { opacity: 0.5; cursor: wait; }
+
+/* -------------------------------------------------------------------- misc */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2c2c2c; border: 2px solid var(--bg); border-radius: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #000; font-family: var(--mono);
+  font-size: 11.5px; font-weight: 600; padding: 10px 18px; border-radius: 2px;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 100;
+}
+.toast.show { opacity: 1; }
+
+</style>
+</head>
+<body>
+  <!-- one cached path per glyph; every preview instance is a <use> of these -->
+  <svg id="glyphDefs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="glyphDefsInner"></defs></svg>
+
+  <div id="app">
+    <header class="topbar">
+      <div class="wordmark">LIQUID<span>.</span>FONT</div>
+      <div class="topbar-divider"></div>
+      <input id="fontNameInput" class="fontname-input" value="Ooze" spellcheck="false" />
+      <div class="topbar-spacer"></div>
+      <div class="swatch-row" id="swatchRow"></div>
+      <div class="topbar-divider"></div>
+      <div class="topbar-meta" id="glyphCountMeta">42 glyphs</div>
+    </header>
+
+    <main class="workspace">
+      <aside class="editor-panel">
+        <div class="panel-label">Glyph editor — <span id="letterBadge">A</span></div>
+        <div class="editor-canvas-wrap">
+          <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div class="readout" id="editorReadout">Click a node, then drag to move it — or drag its orange rim to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
+
+        <div class="node-inspector" id="nodeInspector">
+          <div class="node-field">
+            <label>X</label>
+            <input type="number" id="nodeX" step="0.5" disabled />
+          </div>
+          <div class="node-field">
+            <label>Y</label>
+            <input type="number" id="nodeY" step="0.5" disabled />
+          </div>
+          <div class="node-field">
+            <label>R</label>
+            <input type="number" id="nodeR" step="0.5" min="2" disabled />
+          </div>
+          <button class="mini-btn" id="btnAddNode" title="Insert a new node next to this one, for finer control over the curve" disabled>+ Node</button>
+          <button class="mini-btn" id="btnDelNode" title="Remove this node" disabled>&minus; Node</button>
+        </div>
+
+        <div class="toggle-grid">
+          <div class="pill-btn" id="btnResetGlyph" title="Revert this glyph to its original nodes">Reset Glyph</div>
+          <div class="pill-btn" id="btnUndo" title="Undo last edit">Undo</div>
+        </div>
+
+        <div class="editor-hint">
+          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its orange rim to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. MELT controls how much neighbouring blobs fuse.
+        </div>
+      </aside>
+
+      <section class="specimen-panel">
+        <div class="specimen-scroll" id="specimenScroll">
+          <div id="testerList"></div>
+          <div class="add-block-row">
+            <button class="mini-btn" id="btnAddBlock">+ Add preview block</button>
+          </div>
+          <div class="glyphset">
+            <div class="glyphset-title">Character set</div>
+            <div id="glyphSet"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="control-bar">
+      <div class="slider-group">
+        <label>Mass <b id="valMass"></b></label>
+        <input type="range" id="sldMass" min="0.6" max="1.5" step="0.01" />
+      </div>
+      <div class="slider-group">
+        <label>Melt <b id="valMelt"></b></label>
+        <input type="range" id="sldMelt" min="0" max="40" step="1" />
+      </div>
+      <div class="slider-group">
+        <label>Tension <b id="valTension"></b></label>
+        <input type="range" id="sldTension" min="-12" max="8" step="0.5" />
+      </div>
+      <div class="slider-group">
+        <label>Wobble <b id="valWobble"></b></label>
+        <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
+      </div>
+      <div class="slider-group">
+        <label>Smooth <b id="valSmooth"></b></label>
+        <input type="range" id="sldSmooth" min="0" max="4" step="1" />
+      </div>
+
+      <div class="control-divider"></div>
+
+      <div class="edit-mode-group">
+        <label>Edit mode</label>
+        <div class="edit-toggle-row">
+          <button class="edit-toggle" id="btnGlobalEdit" title="Apply node edits to every glyph sharing this node index">Global</button>
+          <button class="edit-toggle" id="btnMirror" title="Mirror node edits across the vertical axis">Mirror</button>
+        </div>
+      </div>
+
+      <div class="control-divider"></div>
+
+      <div class="select-group">
+        <label>Flow state</label>
+        <select id="presetSelect">
+          <option value="liquid" selected>Liquid</option>
+          <option value="mercury">Mercury</option>
+          <option value="acid">Acid</option>
+          <option value="molten">Molten</option>
+          <option value="bubble">Bubble</option>
+          <option value="goo">Goo</option>
+        </select>
+      </div>
+
+      <div class="select-group">
+        <label>Flow <b id="seedLabel" class="seed-label">#5</b></label>
+        <button class="text-btn reseed" id="btnReseed">Restir &#8635;</button>
+      </div>
+
+      <div class="control-spacer"></div>
+
+      <div class="export-group">
+        <button class="export-btn secondary" id="btnExportSvg">SVG</button>
+        <button class="export-btn secondary" id="btnExportPng">PNG</button>
+        <button class="export-btn" id="btnExportOtf">Export OTF</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+
+<script>
+// ---------------------------------------------------------------------------
+// Metaball / SDF letterform engine.
+//
+// A glyph is a set of chains of NODES, each node carrying its own radius.
+// Consecutive nodes are joined by a tapered capsule (radius lerps along the
+// segment -> variable stroke thickness). All capsules are combined with a
+// polynomial smooth-minimum, which makes the mass pool and bulge where
+// strokes meet, exactly like a viscous liquid.
+//
+// The resulting scalar field is contoured with marching squares and then
+// Chaikin-smoothed, so every edge comes out round -- there are no straight
+// lines or corners anywhere in the output by construction.
+// ---------------------------------------------------------------------------
+(function (root, factory) {
+  if (typeof module !== 'undefined' && module.exports) module.exports = factory();
+  else root.BlobEngine = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- noise
+  function hash2(ix, iy, seed) {
+    var h = ix * 374761393 + iy * 668265263 + seed * 1274126177;
+    h = (h ^ (h >> 13)) * 1274126177;
+    return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+  }
+  function valueNoise(x, y, seed) {
+    var ix = Math.floor(x), iy = Math.floor(y);
+    var fx = x - ix, fy = y - iy;
+    var ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    var a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed);
+    var c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
+    return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+  }
+
+  // ------------------------------------------------------------------ sdf
+  // Tapered capsule: distance to the segment a-b whose radius lerps ra->rb.
+  function sdTaperedCapsule(px, py, ax, ay, ra, bx, by, rb) {
+    var bax = bx - ax, bay = by - ay;
+    var l2 = bax * bax + bay * bay;
+    var t = l2 > 1e-9 ? ((px - ax) * bax + (py - ay) * bay) / l2 : 0;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    var cx = ax + bax * t, cy = ay + bay * t;
+    var dx = px - cx, dy = py - cy;
+    return Math.sqrt(dx * dx + dy * dy) - (ra + (rb - ra) * t);
+  }
+
+  // Polynomial smooth minimum — the "melt". k=0 is a hard union.
+  function smin(a, b, k) {
+    if (k <= 1e-6) return a < b ? a : b;
+    var h = k - Math.abs(a - b);
+    if (h < 0) h = 0;
+    h /= k;
+    return (a < b ? a : b) - h * h * k * 0.25;
+  }
+
+  // Flatten chains into a capsule list once, so the field loop stays tight.
+  function buildCapsules(chains, mass) {
+    var caps = [];
+    for (var c = 0; c < chains.length; c++) {
+      var ch = chains[c];
+      if (ch.length === 1) {
+        var n = ch[0];
+        caps.push([n[0], n[1], n[2] * mass, n[0], n[1], n[2] * mass]);
+        continue;
+      }
+      for (var i = 0; i < ch.length - 1; i++) {
+        var a = ch[i], b = ch[i + 1];
+        caps.push([a[0], a[1], a[2] * mass, b[0], b[1], b[2] * mass]);
+      }
+    }
+    return caps;
+  }
+
+  function makeField(caps, opts) {
+    var melt = opts.melt, tension = opts.tension;
+    var wob = opts.wobble, grain = opts.grain, seed = opts.seed;
+    return function (px, py) {
+      var d = 1e9;
+      for (var i = 0; i < caps.length; i++) {
+        var c = caps[i];
+        var di = sdTaperedCapsule(px, py, c[0], c[1], c[2], c[3], c[4], c[5]);
+        d = smin(d, di, melt);
+      }
+      if (wob > 0) {
+        // two octaves of drifting noise = molten, uneven surface
+        var n = valueNoise(px * grain, py * grain, seed) - 0.5;
+        n += (valueNoise(px * grain * 2.3, py * grain * 2.3, seed + 91) - 0.5) * 0.5;
+        d += n * wob;
+      }
+      return d - tension;
+    };
+  }
+
+  // -------------------------------------------------------- marching squares
+  var CASES = [
+    [], [[3, 0]], [[0, 1]], [[3, 1]], [[1, 2]], [[3, 0], [1, 2]], [[0, 2]], [[3, 2]],
+    [[2, 3]], [[2, 0]], [[0, 1], [2, 3]], [[2, 1]], [[1, 3]], [[1, 0]], [[0, 3]], [],
+  ];
+
+  function contour(field, bounds, res) {
+    var x0 = bounds[0], y0 = bounds[1], x1 = bounds[2], y1 = bounds[3];
+    var nx = Math.max(2, Math.ceil((x1 - x0) / res));
+    var ny = Math.max(2, Math.ceil((y1 - y0) / res));
+    var hx = (x1 - x0) / nx, hy = (y1 - y0) / ny;
+
+    // sample grid once
+    var V = new Float64Array((nx + 1) * (ny + 1));
+    for (var j = 0; j <= ny; j++) {
+      for (var i = 0; i <= nx; i++) {
+        V[j * (nx + 1) + i] = field(x0 + i * hx, y0 + j * hy);
+      }
+    }
+
+    var segs = [];
+    function interp(va, vb, ax, ay, bx, by) {
+      var t = va / (va - vb);
+      return [ax + (bx - ax) * t, ay + (by - ay) * t];
+    }
+
+    for (var jj = 0; jj < ny; jj++) {
+      for (var ii = 0; ii < nx; ii++) {
+        var v00 = V[jj * (nx + 1) + ii];
+        var v10 = V[jj * (nx + 1) + ii + 1];
+        var v11 = V[(jj + 1) * (nx + 1) + ii + 1];
+        var v01 = V[(jj + 1) * (nx + 1) + ii];
+        var idx = (v00 < 0 ? 1 : 0) | (v10 < 0 ? 2 : 0) | (v11 < 0 ? 4 : 0) | (v01 < 0 ? 8 : 0);
+        if (idx === 0 || idx === 15) continue;
+
+        var cx0 = x0 + ii * hx, cy0 = y0 + jj * hy;
+        var cx1 = cx0 + hx, cy1 = cy0 + hy;
+        var E = [
+          v00 !== v10 ? interp(v00, v10, cx0, cy0, cx1, cy0) : [cx0, cy0], // top
+          v10 !== v11 ? interp(v10, v11, cx1, cy0, cx1, cy1) : [cx1, cy0], // right
+          v11 !== v01 ? interp(v11, v01, cx1, cy1, cx0, cy1) : [cx1, cy1], // bottom
+          v01 !== v00 ? interp(v01, v00, cx0, cy1, cx0, cy0) : [cx0, cy1], // left
+        ];
+
+        var cs = CASES[idx];
+        // saddle disambiguation via the cell-centre sample
+        if (idx === 5 || idx === 10) {
+          var mid = field((cx0 + cx1) / 2, (cy0 + cy1) / 2);
+          if ((idx === 5) === (mid >= 0)) cs = idx === 5 ? [[3, 2], [1, 0]] : [[0, 3], [2, 1]];
+        }
+        for (var s = 0; s < cs.length; s++) segs.push([E[cs[s][0]], E[cs[s][1]]]);
+      }
+    }
+    return segs;
+  }
+
+  // ------------------------------------------------------------- stitching
+  // Walk segments into closed rings WITHOUT assuming a consistent direction.
+  // Marching-squares saddle cells can emit a segment wound opposite to its
+  // neighbours; a head-to-tail-only walk stalls there and leaves the ring
+  // open, which later renders as a straight chord across the glyph. Matching
+  // either endpoint makes the trace robust — final winding is fixed later by
+  // the containment pass anyway.
+  function stitch(segs, tol) {
+    var key = function (p) { return Math.round(p[0] / tol) + ':' + Math.round(p[1] / tol); };
+    var ends = new Map();
+    function add(k, rec) {
+      if (!ends.has(k)) ends.set(k, []);
+      ends.get(k).push(rec);
+    }
+    for (var i = 0; i < segs.length; i++) {
+      add(key(segs[i][0]), [i, 0]);
+      add(key(segs[i][1]), [i, 1]);
+    }
+
+    var used = new Array(segs.length).fill(false);
+    var rings = [];
+    for (var s = 0; s < segs.length; s++) {
+      if (used[s]) continue;
+      used[s] = true;
+      var ring = [segs[s][0], segs[s][1]];
+      var startKey = key(segs[s][0]);
+      var guard = 0, flipped = false, closedRing = false;
+      while (guard++ < 200000) {
+        var tail = ring[ring.length - 1];
+        var tk = key(tail);
+        if (tk === startKey && ring.length > 2) { closedRing = true; break; }
+        var cand = ends.get(tk), nxt = -1, nend = 0;
+        if (cand) {
+          for (var c = 0; c < cand.length; c++) {
+            if (!used[cand[c][0]]) { nxt = cand[c][0]; nend = cand[c][1]; break; }
+          }
+        }
+        if (nxt < 0) {
+          // Dead end. The seed segment may have started mid-contour, so turn
+          // around and keep growing from the other end before giving up —
+          // otherwise a contour gets shredded into orphan fragments.
+          if (flipped) break;
+          flipped = true;
+          ring.reverse();
+          startKey = key(ring[0]);
+          continue;
+        }
+        used[nxt] = true;
+        ring.push(segs[nxt][nend === 0 ? 1 : 0]);
+      }
+      // Keep every fragment, however short — repairChains reassembles them.
+      // Dropping them here silently deletes whole limbs of a glyph.
+      if (ring.length >= 2) rings.push(ring);
+    }
+    return rings;
+  }
+
+  // A single closed contour can still get split into open chains where the
+  // shape pinches and four segment-ends meet in one cell. Reassemble by
+  // repeatedly joining whichever two open chains have the nearest endpoints,
+  // then closing what remains.
+  function repairChains(chains, tol) {
+    var d2 = function (a, b) { var dx = a[0] - b[0], dy = a[1] - b[1]; return dx * dx + dy * dy; };
+    var closed = [], open = [];
+    for (var i = 0; i < chains.length; i++) {
+      var c = chains[i];
+      (d2(c[0], c[c.length - 1]) <= tol * tol ? closed : open).push(c);
+    }
+
+    var joined = true;
+    while (joined && open.length > 1) {
+      joined = false;
+      var bestD = Infinity, bi = -1, bj = -1, mode = 0;
+      for (var a = 0; a < open.length && !joined; a++) {
+        for (var b = a + 1; b < open.length; b++) {
+          var A = open[a], B = open[b];
+          var cands = [
+            [d2(A[A.length - 1], B[0]), 0],
+            [d2(A[A.length - 1], B[B.length - 1]), 1],
+            [d2(A[0], B[0]), 2],
+            [d2(A[0], B[B.length - 1]), 3],
+          ];
+          for (var k = 0; k < 4; k++) {
+            if (cands[k][0] < bestD) { bestD = cands[k][0]; bi = a; bj = b; mode = cands[k][1]; }
+          }
+        }
+      }
+      if (bi >= 0 && bestD <= tol * tol) {
+        var A2 = open[bi], B2 = open[bj];
+        var merged;
+        if (mode === 0) merged = A2.concat(B2);
+        else if (mode === 1) merged = A2.concat(B2.slice().reverse());
+        else if (mode === 2) merged = A2.slice().reverse().concat(B2);
+        else merged = B2.concat(A2);
+        open.splice(bj, 1); open.splice(bi, 1);
+        open.push(merged);
+        joined = true;
+      }
+    }
+
+    for (var m = 0; m < open.length; m++) {
+      if (open[m].length > 4) closed.push(open[m]); // implicit close
+    }
+    return closed;
+  }
+
+  // --------------------------------------------------------------- smoothing
+  function chaikin(ring, iters) {
+    var pts = ring.slice();
+    if (pts.length > 2) {
+      var a = pts[0], b = pts[pts.length - 1];
+      if (Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6) pts.pop();
+    }
+    for (var it = 0; it < iters; it++) {
+      var n = pts.length;
+      if (n < 4) break;
+      var out = new Array(n * 2);
+      for (var i = 0; i < n; i++) {
+        var p = pts[i], q = pts[(i + 1) % n];
+        out[i * 2] = [p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25];
+        out[i * 2 + 1] = [p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75];
+      }
+      pts = out;
+    }
+    return pts;
+  }
+
+  // ------------------------------------------------------------- decimation
+  // Chaikin quadruples the point count; thin it back out with Douglas-Peucker
+  // so the contour stays smooth but exportable (font charstrings and polygon
+  // maths both choke on thousands of near-collinear points).
+  function pointSegDist(p, a, b) {
+    var dx = b[0] - a[0], dy = b[1] - a[1];
+    var l2 = dx * dx + dy * dy;
+    if (l2 < 1e-12) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+    var t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  }
+  function dpChain(pts, first, last, tol, keep) {
+    var stack = [[first, last]];
+    while (stack.length) {
+      var fl = stack.pop(), f = fl[0], l = fl[1];
+      if (l <= f + 1) continue;
+      var maxD = -1, idx = -1;
+      for (var i = f + 1; i < l; i++) {
+        var d = pointSegDist(pts[i], pts[f], pts[l]);
+        if (d > maxD) { maxD = d; idx = i; }
+      }
+      if (maxD > tol) { keep[idx] = true; stack.push([f, idx], [idx, l]); }
+    }
+  }
+  function decimateRing(ring, tol) {
+    var n = ring.length;
+    if (n < 8) return ring;
+    var keep = new Array(n).fill(false);
+    var anchor = 0, far = -1;
+    for (var i = 1; i < n; i++) {
+      var d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
+      if (d > far) { far = d; anchor = i; }
+    }
+    keep[0] = true; keep[anchor] = true;
+    dpChain(ring, 0, anchor, tol, keep);
+    var tail = ring.slice(anchor).concat([ring[0]]);
+    var tk = new Array(tail.length).fill(false);
+    tk[0] = true; tk[tail.length - 1] = true;
+    dpChain(tail, 0, tail.length - 1, tol, tk);
+    for (var j = 1; j < tail.length - 1; j++) if (tk[j]) keep[anchor + j] = true;
+    var out = [];
+    for (var k = 0; k < n; k++) if (keep[k]) out.push(ring[k]);
+    return out.length >= 6 ? out : ring;
+  }
+
+  // ------------------------------------------------------------ orientation
+  function signedArea(r) {
+    var a = 0;
+    for (var i = 0; i < r.length; i++) {
+      var p = r[i], q = r[(i + 1) % r.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return a / 2;
+  }
+  function pointInRing(pt, ring) {
+    var inside = false, x = pt[0], y = pt[1];
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+
+  // ------------------------------------------------------------- main entry
+  function glyphRings(chains, opts) {
+    var o = {
+      mass: opts.mass == null ? 1 : opts.mass,
+      melt: opts.melt == null ? 10 : opts.melt,
+      tension: opts.tension == null ? 0 : opts.tension,
+      wobble: opts.wobble == null ? 0 : opts.wobble,
+      grain: opts.grain == null ? 0.045 : opts.grain,
+      seed: opts.seed == null ? 1 : opts.seed,
+      smooth: opts.smooth == null ? 2 : opts.smooth,
+      res: opts.res == null ? 1.7 : opts.res,
+      simplify: opts.simplify == null ? 0.3 : opts.simplify,
+    };
+    var caps = buildCapsules(chains, o.mass);
+    if (!caps.length) return [];
+
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (var i = 0; i < caps.length; i++) {
+      var c = caps[i];
+      minX = Math.min(minX, c[0] - c[2], c[3] - c[5]);
+      maxX = Math.max(maxX, c[0] + c[2], c[3] + c[5]);
+      minY = Math.min(minY, c[1] - c[2], c[4] - c[5]);
+      maxY = Math.max(maxY, c[1] + c[2], c[4] + c[5]);
+    }
+    // headroom for melt bulge, tension inflation and noise displacement
+    var pad = o.melt * 0.5 + Math.abs(o.tension) + o.wobble + o.res * 3;
+    var bounds = [minX - pad, minY - pad, maxX + pad, maxY + pad];
+
+    var field = makeField(caps, o);
+    var segs = contour(field, bounds, o.res);
+    if (!segs.length) return [];
+    if (opts._debug) {
+      var raw = stitch(segs, o.res * 0.05);
+      return { segs: segs.length, raw: raw.map(function (r) { return r.length; }),
+               rawRings: raw, bounds: bounds };
+    }
+    var rings = repairChains(stitch(segs, o.res * 0.05), o.res * 4)
+      .map(function (r) { return chaikin(r, o.smooth); })
+      .map(function (r) { return o.simplify > 0 ? decimateRing(r, o.simplify) : r; })
+      .filter(function (r) { return r.length > 5 && Math.abs(signedArea(r)) > 0.8; });
+
+    // Outer shells wound one way, counters the other, so a nonzero fill (what
+    // OpenType uses) punches the holes correctly.
+    return rings.map(function (r, i) {
+      var depth = 0;
+      for (var j = 0; j < rings.length; j++) {
+        if (j !== i && pointInRing(r[0], rings[j])) depth++;
+      }
+      var wantPositive = depth % 2 === 0;
+      var isPositive = signedArea(r) > 0;
+      return isPositive === wantPositive ? r : r.slice().reverse();
+    });
+  }
+
+  return { glyphRings: glyphRings, signedArea: signedArea };
+});
+
+</script>
+
+<script>
+var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[46, 7, 12], [28, 50, 16], [11, 94, 21]], [[46, 7, 12], [64, 50, 16], [81, 94, 21]], [[25, 67, 13], [67, 67, 13]]], "B": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[20, 6, 19], [54, 10, 15], [66, 28, 17], [52, 48, 13], [20, 50, 14]], [[20, 50, 14], [57, 54, 16], [70, 72, 19], [54, 94, 16], [20, 94, 20]]], "C": [[[74, 20, 15], [52, 6, 17], [24, 16, 19], [12, 50, 20], [24, 84, 19], [52, 95, 17], [76, 81, 15]]], "D": [[[20, 6, 19], [20, 94, 20]], [[20, 6, 19], [52, 9, 17], [73, 30, 20], [73, 70, 20], [52, 92, 17], [20, 94, 20]]], "E": [[[72, 8, 15], [24, 6, 19], [18, 50, 15], [24, 94, 19], [74, 93, 15]], [[20, 50, 15], [58, 50, 13]]], "F": [[[20, 94, 20], [18, 50, 15], [22, 6, 19], [72, 8, 15]], [[20, 50, 15], [58, 50, 13]]], "G": [[[74, 20, 15], [52, 6, 17], [24, 16, 19], [12, 50, 20], [24, 84, 19], [54, 95, 16], [77, 76, 17], [75, 56, 14], [53, 56, 12]]], "H": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[72, 6, 19], [73, 50, 14], [72, 94, 20]], [[20, 50, 14], [72, 50, 14]]], "I": [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]], "J": [[[62, 6, 17], [63, 58, 16], [55, 87, 18], [33, 95, 19], [15, 80, 17]]], "K": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[75, 7, 15], [20, 52, 14]], [[20, 48, 14], [77, 94, 16]]], "L": [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, 93, 15]]], "M": [[[10, 94, 20], [12, 8, 18], [46, 56, 13], [80, 8, 18], [82, 94, 20]]], "N": [[[20, 94, 20], [18, 7, 19], [72, 92, 17], [72, 6, 19]]], "O": [[[46, 5, 18], [72, 16, 19], [82, 50, 20], [72, 84, 19], [46, 95, 18], [20, 84, 19], [10, 50, 20], [20, 16, 19], [46, 5, 18]]], "P": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [56, 10, 16], [69, 30, 18], [54, 52, 14], [20, 54, 15]]], "Q": [[[46, 5, 18], [72, 16, 19], [82, 50, 20], [72, 84, 19], [46, 95, 18], [20, 84, 19], [10, 50, 20], [20, 16, 19], [46, 5, 18]], [[58, 78, 13], [82, 101, 15]]], "R": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [56, 10, 16], [69, 30, 18], [54, 52, 14], [20, 54, 15]], [[27, 54, 14], [76, 94, 17]]], "S": [[[74, 18, 15], [48, 5, 17], [22, 17, 18], [31, 40, 13], [57, 54, 15], [70, 70, 17], [52, 95, 17], [17, 83, 17]]], "T": [[[8, 7, 16], [80, 7, 16]], [[44, 6, 17], [45, 50, 14], [44, 94, 20]]], "U": [[[18, 6, 19], [18, 62, 16], [30, 90, 18], [46, 95, 19], [62, 90, 18], [74, 62, 16], [74, 6, 19]]], "V": [[[10, 7, 18], [46, 94, 20], [82, 7, 18]]], "W": [[[6, 7, 17], [24, 94, 19], [46, 44, 13], [68, 94, 19], [86, 7, 17]]], "X": [[[12, 7, 17], [78, 94, 19]], [[78, 7, 17], [12, 94, 19]]], "Y": [[[12, 7, 17], [46, 52, 14], [80, 7, 17]], [[46, 52, 14], [45, 94, 20]]], "Z": [[[12, 7, 17], [78, 6, 17], [14, 94, 19], [80, 93, 17]]], "0": [[[46, 5, 18], [72, 16, 19], [82, 50, 20], [72, 84, 19], [46, 95, 18], [20, 84, 19], [10, 50, 20], [20, 16, 19], [46, 5, 18]]], "1": [[[28, 21, 14], [46, 6, 17], [45, 50, 15], [46, 94, 20]]], "2": [[[16, 23, 16], [40, 5, 18], [68, 19, 17], [57, 45, 13], [16, 94, 18], [77, 93, 16]]], "3": [[[18, 13, 16], [48, 5, 17], [68, 23, 16], [46, 47, 12], [70, 68, 17], [48, 95, 17], [16, 85, 16]]], "4": [[[68, 94, 19], [68, 6, 17], [10, 64, 16], [83, 64, 15]]], "5": [[[74, 7, 15], [26, 6, 17], [22, 41, 14], [53, 43, 16], [70, 64, 18], [52, 95, 17], [17, 85, 16]]], "6": [[[70, 8, 15], [36, 14, 17], [18, 45, 18], [16, 72, 18], [35, 94, 18], [59, 87, 17], [62, 64, 14], [38, 58, 13], [20, 67, 16]]], "7": [[[10, 7, 17], [80, 6, 17], [36, 94, 19]]], "8": [[[46, 6, 15], [65, 21, 15], [46, 45, 11], [27, 21, 15], [46, 6, 15]], [[46, 45, 11], [71, 67, 17], [46, 95, 18], [21, 67, 17], [46, 45, 11]]], "9": [[[22, 92, 15], [56, 86, 17], [74, 55, 18], [76, 28, 18], [57, 6, 18], [33, 13, 17], [30, 36, 14], [54, 42, 13], [72, 33, 16]]], ".": [[[46, 86, 13]]], ",": [[[48, 84, 12], [38, 105, 9]]], "!": [[[46, 6, 16], [45, 58, 12]], [[46, 88, 14]]], "?": [[[16, 23, 15], [44, 5, 17], [68, 21, 16], [50, 47, 12], [46, 63, 11]], [[46, 88, 14]]], "'": [[[46, 6, 13], [42, 27, 10]]], "-": [[[16, 50, 14], [76, 50, 14]]]}};
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var GH = GLYPH_DATA.H, GW = GLYPH_DATA.W, BASE = GLYPH_DATA.glyphs;
+
+  // fixed vertical frame: every glyph shares a baseline even though widths vary
+  var VB_Y0 = -18, VB_H = GH + 40;
+
+  var PRESETS = {
+    liquid:  { mass: 1.00, melt: 15, tension: -4, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
+    mercury: { mass: 1.05, melt: 24, tension: -2, wobble: 0,   grain: 0.045, smooth: 3, res: 1.6 },
+    acid:    { mass: 1.08, melt: 26, tension: -2, wobble: 2.2, grain: 0.050, smooth: 3, res: 1.5 },
+    molten:  { mass: 1.16, melt: 30, tension:  2, wobble: 1.2, grain: 0.040, smooth: 3, res: 1.6 },
+    bubble:  { mass: 0.94, melt:  7, tension: -7, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
+    goo:     { mass: 1.10, melt: 20, tension:  0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
+  };
+
+  var PALETTE = ['#ffffff', '#ff5000', '#000000', '#8a8a8a'];
+
+  var SETS = [
+    ['Uppercase', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    ['Numerals', '0123456789'],
+    ['Punctuation', ".,!?'-"],
+  ];
+
+  // ------------------------------------------------------------ glyph model
+  var FLAT = {}, MIRROR = {};
+  Object.keys(BASE).forEach(function (L) {
+    var nodes = [], lens = [];
+    BASE[L].forEach(function (c) { lens.push(c.length); c.forEach(function (n) { nodes.push(n.slice()); }); });
+    FLAT[L] = { nodes: nodes, lens: lens };
+  });
+  function computeMirrorMap(L) {
+    var ns = FLAT[L].nodes;
+    return ns.map(function (p, i) {
+      var best = i, bd = Infinity;
+      ns.forEach(function (q, j) {
+        if (j === i) return;
+        var d = Math.abs(q[1] - p[1]) + Math.abs(q[0] - (GW - p[0]));
+        if (d < bd) { bd = d; best = j; }
+      });
+      return bd < 7 ? best : i;
+    });
+  }
+  Object.keys(BASE).forEach(function (L) { MIRROR[L] = computeMirrorMap(L); });
+
+  var globalOv = {}, letterOv = {}, undoStack = [];
+  var letterVer = {}; Object.keys(BASE).forEach(function (L) { letterVer[L] = 0; });
+  var globalVer = 0;
+
+  function effNodes(L) {
+    return FLAT[L].nodes.map(function (n, i) {
+      var dx = 0, dy = 0, dr = 0;
+      var g = globalOv[i]; if (g) { dx += g[0]; dy += g[1]; dr += g[2]; }
+      var l = letterOv[L] && letterOv[L][i]; if (l) { dx += l[0]; dy += l[1]; dr += l[2]; }
+      return [n[0] + dx, n[1] + dy, Math.max(2, n[2] + dr)];
+    });
+  }
+  function chainsOf(L) {
+    var f = effNodes(L), lens = FLAT[L].lens, out = [], k = 0;
+    for (var i = 0; i < lens.length; i++) { out.push(f.slice(k, k + lens[i])); k += lens[i]; }
+    return out;
+  }
+  function setOverride(L, i, d) {
+    if (state.globalEdit) { globalOv[i] = d; globalVer++; }
+    else { if (!letterOv[L]) letterOv[L] = {}; letterOv[L][i] = d; letterVer[L]++; }
+  }
+
+  // ------------------------------------------------------------------ cache
+  var cache = {};
+  function shapeKey() {
+    var s = state;
+    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res, s.seed].join('|');
+  }
+  function ringsOf(L) {
+    var k = L + '@' + shapeKey() + '@' + globalVer + '.' + letterVer[L];
+    if (cache[k]) return cache[k];
+    var r;
+    try {
+      r = BlobEngine.glyphRings(chainsOf(L), {
+        mass: state.mass, melt: state.melt, tension: state.tension, wobble: state.wobble,
+        grain: state.grain, smooth: state.smooth, res: state.res, simplify: 0.3,
+        seed: state.seed + L.charCodeAt(0) * 13,
+      });
+    } catch (e) { console.error('glyph failed', L, e); r = []; }
+    if (Object.keys(cache).length > 700) cache = {};
+    cache[k] = r;
+    return r;
+  }
+  function ringsToD(rings) {
+    var d = '';
+    for (var i = 0; i < rings.length; i++) {
+      var r = rings[i];
+      d += 'M' + r[0][0].toFixed(2) + ',' + r[0][1].toFixed(2);
+      for (var j = 1; j < r.length; j++) d += 'L' + r[j][0].toFixed(2) + ',' + r[j][1].toFixed(2);
+      d += 'Z';
+    }
+    return d;
+  }
+  function inkBounds(rings) {
+    var a = 1e9, b = -1e9;
+    rings.forEach(function (r) { r.forEach(function (p) { if (p[0] < a) a = p[0]; if (p[0] > b) b = p[0]; }); });
+    return a > b ? [0, GW] : [a, b];
+  }
+
+  // ------------------------------------------------------------------ state
+  var uid = 0;
+  var state = Object.assign({
+    seed: 5, preset: 'liquid',
+    fontName: 'Ooze', ink: PALETTE[0],
+    selected: 'A', activeNode: -1, globalEdit: false, mirror: false,
+    blocks: [
+      { id: ++uid, text: 'LIQUID TYPE 2026', size: 120, lh: 105, tr: 0.01, paper: false, editing: false },
+      { id: ++uid, text: 'THE RIGHT MAN IN THE WRONG PLACE CAN MAKE ALL THE DIFFERENCE IN THE WORLD', size: 54, lh: 122, tr: 0.01, paper: false, editing: false },
+      { id: ++uid, text: 'OOZE?!', size: 210, lh: 118, tr: 0.01, paper: true, editing: false },
+      { id: ++uid, text: "IN A CULTURE LIKE OURS, LONG ACCUSTOMED TO SPLITTING AND DIVIDING ALL THINGS AS A MEANS OF CONTROL, IT IS SOMETIMES A BIT OF A SHOCK TO BE REMINDED THAT, IN OPERATIONAL AND PRACTICAL FACT, THE MEDIUM IS THE MESSAGE.", size: 22, lh: 140, tr: 0.02, paper: false, editing: false },
+    ],
+  }, PRESETS.liquid);
+
+  var $ = function (id) { return document.getElementById(id); };
+  var defsInner = $('glyphDefsInner');
+  var testerList = $('testerList'), glyphSetEl = $('glyphSet');
+  var edSvg = $('editorSvg'), readout = $('editorReadout'), badge = $('letterBadge');
+  var nodeXEl = $('nodeX'), nodeYEl = $('nodeY'), nodeREl = $('nodeR');
+  var addNodeBtn = $('btnAddNode'), delNodeBtn = $('btnDelNode');
+  var toastEl = $('toast'), toastT = null;
+  function toast(m, ms) {
+    toastEl.textContent = m; toastEl.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(function () { toastEl.classList.remove('show'); }, ms || 2200);
+  }
+
+  // ----------------------------------------------------- shared glyph defs
+  // One <path> per glyph, referenced by every preview instance via <use>.
+  // A long paragraph would otherwise mean hundreds of copies of the same
+  // few-hundred-point outline.
+  var METRICS = {};
+  function refreshDefs() {
+    var out = '';
+    Object.keys(BASE).forEach(function (L) {
+      var rings = ringsOf(L), bb = inkBounds(rings);
+      METRICS[L] = { x0: bb[0], w: bb[1] - bb[0] };
+      out += '<path id="gly' + L.charCodeAt(0) + '" d="' + ringsToD(rings) + '" fill-rule="nonzero"/>';
+    });
+    defsInner.innerHTML = out;
+  }
+
+  var SIDE = 5;   // side bearing, glyph units
+  var SPACE = 30; // word space, glyph units
+
+  function glyphSvg(L, sizePx, cls) {
+    var m = METRICS[L];
+    var w = m.w + SIDE * 2;
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', (m.x0 - SIDE) + ' ' + VB_Y0 + ' ' + w + ' ' + VB_H);
+    var hpx = sizePx * VB_H / GH;
+    svg.setAttribute('height', hpx);
+    svg.setAttribute('width', w * sizePx / GH);
+    svg.style.verticalAlign = (-(VB_H + VB_Y0 - GH) * sizePx / GH) + 'px';
+    var u = document.createElementNS(NS, 'use');
+    u.setAttribute('href', '#gly' + L.charCodeAt(0));
+    u.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#gly' + L.charCodeAt(0));
+    u.setAttribute('fill', 'currentColor');
+    svg.appendChild(u);
+    if (cls) svg.setAttribute('class', cls);
+    return svg;
+  }
+
+  // --------------------------------------------------------- tester blocks
+  function renderTesters() {
+    testerList.innerHTML = '';
+    state.blocks.forEach(function (b) { testerList.appendChild(buildTester(b)); });
+  }
+
+  function ctrl(label, min, max, step, val, fmt, onInput) {
+    var wrap = document.createElement('div');
+    wrap.className = 'tester-ctrl';
+    var b = document.createElement('b');
+    b.textContent = fmt(val);
+    var r = document.createElement('input');
+    r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = val;
+    r.addEventListener('input', function () {
+      var v = parseFloat(r.value);
+      b.textContent = fmt(v);
+      onInput(v);
+    });
+    wrap.appendChild(b); wrap.appendChild(r);
+    wrap.title = label;
+    return wrap;
+  }
+
+  function buildTester(b) {
+    var root = document.createElement('div');
+    root.className = 'tester' + (b.paper ? ' paper' : '');
+
+    var head = document.createElement('div');
+    head.className = 'tester-head';
+
+    var name = document.createElement('div');
+    name.className = 'tester-name';
+    name.textContent = state.fontName;
+    name.dataset.role = 'name';
+    head.appendChild(name);
+
+    head.appendChild(ctrl('Size', 10, 300, 1, b.size, function (v) { return Math.round(v) + 'px'; },
+      function (v) { b.size = v; paintText(root, b); }));
+    head.appendChild(ctrl('Line height', 80, 220, 1, b.lh, function (v) { return Math.round(v) + '%'; },
+      function (v) { b.lh = v; paintText(root, b); }));
+    head.appendChild(ctrl('Letter spacing', -0.06, 0.4, 0.005, b.tr, function (v) { return v.toFixed(3) + 'em'; },
+      function (v) { b.tr = v; paintText(root, b); }));
+
+    var sp = document.createElement('div'); sp.className = 'tester-spacer';
+    head.appendChild(sp);
+
+    var inv = document.createElement('button');
+    inv.className = 'mini-btn' + (b.paper ? ' on' : '');
+    inv.textContent = b.paper ? 'Paper' : 'Ink';
+    inv.addEventListener('click', function () {
+      b.paper = !b.paper;
+      root.classList.toggle('paper', b.paper);
+      inv.classList.toggle('on', b.paper);
+      inv.textContent = b.paper ? 'Paper' : 'Ink';
+      paintText(root, b);
+    });
+    head.appendChild(inv);
+
+    var del = document.createElement('button');
+    del.className = 'mini-btn';
+    del.textContent = '×';
+    del.title = 'Remove this block';
+    del.addEventListener('click', function () {
+      state.blocks = state.blocks.filter(function (x) { return x !== b; });
+      renderTesters();
+    });
+    head.appendChild(del);
+
+    root.appendChild(head);
+
+    var body = document.createElement('div');
+    body.className = 'tester-body';
+    root.appendChild(body);
+
+    paintText(root, b);
+    return root;
+  }
+
+  function paintText(root, b) {
+    var body = root.querySelector('.tester-body');
+    body.innerHTML = '';
+
+    if (b.editing) {
+      var ta = document.createElement('textarea');
+      ta.className = 'tester-edit';
+      ta.value = b.text;
+      body.appendChild(ta);
+      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      var commit = function () {
+        b.text = ta.value; b.editing = false; paintText(root, b);
+      };
+      ta.addEventListener('blur', commit);
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { b.editing = false; paintText(root, b); }
+      });
+      return;
+    }
+
+    var holder = document.createElement('div');
+    holder.className = 'tester-text';
+    holder.style.lineHeight = (b.lh / 100);
+    holder.style.letterSpacing = b.tr + 'em';
+    holder.style.fontSize = b.size + 'px';
+    holder.style.color = b.paper ? '#000' : state.ink;
+    holder.title = 'Click to edit this text';
+    holder.addEventListener('click', function () { b.editing = true; paintText(root, b); });
+
+    var words = b.text.split(/(\s+)/);
+    words.forEach(function (chunk) {
+      if (/^\s+$/.test(chunk)) {
+        holder.appendChild(document.createTextNode(' '));
+        return;
+      }
+      var word = document.createElement('span');
+      word.className = 'word';
+      for (var i = 0; i < chunk.length; i++) {
+        var L = chunk[i].toUpperCase();
+        if (!BASE[L]) continue;
+        word.appendChild(glyphSvg(L, b.size));
+      }
+      if (word.childNodes.length) holder.appendChild(word);
+    });
+
+    body.appendChild(holder);
+  }
+
+  function repaintAllTesters() {
+    var roots = testerList.querySelectorAll('.tester');
+    for (var i = 0; i < roots.length; i++) paintText(roots[i], state.blocks[i]);
+  }
+
+  // ------------------------------------------------------------- glyph set
+  function renderGlyphSet() {
+    glyphSetEl.innerHTML = '';
+    SETS.forEach(function (grp) {
+      var g = document.createElement('div');
+      g.className = 'glyphset-group';
+      var lab = document.createElement('div');
+      lab.className = 'glyphset-label';
+      lab.textContent = grp[0];
+      g.appendChild(lab);
+      var row = document.createElement('div');
+      row.className = 'glyphset-row';
+      for (var i = 0; i < grp[1].length; i++) {
+        (function (L) {
+          if (!BASE[L]) return;
+          var cell = document.createElement('div');
+          cell.className = 'glyph-cell' + (L === state.selected ? ' selected' : '');
+          cell.dataset.letter = L;
+          cell.style.color = state.ink === '#000000' ? '#fff' : state.ink;
+          cell.appendChild(glyphSvg(L, 46));
+          cell.addEventListener('click', function () { selectLetter(L); });
+          row.appendChild(cell);
+        })(grp[1][i]);
+      }
+      g.appendChild(row);
+      glyphSetEl.appendChild(g);
+    });
+  }
+
+  // ----------------------------------------------------------------- editor
+  function mkEl(t, a) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); return e; }
+
+  // zoom / pan: viewBox is centered on (edCx, edCy) with span shrunk by edZoom
+  var ED_PAD = 26;
+  var ED_BW = GW + ED_PAD * 2, ED_BH = VB_H + 8;
+  var ED_CX0 = -ED_PAD + ED_BW / 2, ED_CY0 = (VB_Y0 - 4) + ED_BH / 2;
+  var edZoom = 1, edCx = ED_CX0, edCy = ED_CY0;
+
+  function renderEditor() {
+    var L = state.selected;
+    badge.textContent = L;
+    var vw = ED_BW / edZoom, vh = ED_BH / edZoom;
+    var vx = edCx - vw / 2, vy = edCy - vh / 2;
+    edSvg.setAttribute('viewBox', vx.toFixed(2) + ' ' + vy.toFixed(2) + ' ' + vw.toFixed(2) + ' ' + vh.toFixed(2));
+    edSvg.innerHTML = '';
+    for (var gx = 0; gx <= GW; gx += 12) edSvg.appendChild(mkEl('line', { x1: gx, y1: 0, x2: gx, y2: GH, stroke: '#1e1e1e', 'stroke-width': 0.6 }));
+    for (var gy = 0; gy <= GH; gy += 12) edSvg.appendChild(mkEl('line', { x1: 0, y1: gy, x2: GW, y2: gy, stroke: '#1e1e1e', 'stroke-width': 0.6 }));
+    edSvg.appendChild(mkEl('line', { x1: -ED_PAD, y1: GH, x2: GW + ED_PAD, y2: GH, stroke: '#3a3a3a', 'stroke-width': 1 }));
+
+    edSvg.appendChild(mkEl('path', { d: ringsToD(ringsOf(L)), fill: '#3b3b3b', 'fill-rule': 'nonzero' }));
+
+    chainsOf(L).forEach(function (c) {
+      if (c.length < 2) return;
+      edSvg.appendChild(mkEl('path', {
+        d: 'M' + c.map(function (n) { return n[0].toFixed(1) + ',' + n[1].toFixed(1); }).join('L'),
+        fill: 'none', stroke: '#6a6a6a', 'stroke-width': 0.9, 'stroke-dasharray': '3 2.5',
+      }));
+    });
+
+    effNodes(L).forEach(function (n, i) {
+      var act = i === state.activeNode;
+      if (act) {
+        edSvg.appendChild(mkEl('circle', {
+          cx: n[0], cy: n[1], r: n[2] * state.mass, fill: 'none',
+          stroke: '#ff5000', 'stroke-width': 1.1, 'stroke-dasharray': '3 2', opacity: 0.95,
+        }));
+        var g = mkEl('circle', { cx: n[0] + n[2] * state.mass, cy: n[1], r: 4.2 });
+        g.setAttribute('class', 'rim-grip');
+        g.addEventListener('pointerdown', function (e) { startDrag(e, i, 'radius'); });
+        edSvg.appendChild(g);
+      }
+      var h = mkEl('circle', { cx: n[0], cy: n[1], r: act ? 4.6 : 3.4 });
+      h.setAttribute('class', 'node-handle' + (act ? ' active' : ''));
+      h.addEventListener('pointerdown', function (e) { startDrag(e, i, 'move'); });
+      edSvg.appendChild(h);
+    });
+    updateUndo();
+    updateNodeInspector();
+  }
+
+  // ---- zoom (scroll) & pan (drag empty canvas) for finer editing precision
+  edSvg.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var r = edSvg.getBoundingClientRect(), vb = edSvg.viewBox.baseVal;
+    var mx = vb.x + (e.clientX - r.left) / r.width * vb.width;
+    var my = vb.y + (e.clientY - r.top) / r.height * vb.height;
+    var nz = Math.min(6, Math.max(0.6, edZoom * Math.pow(1.0016, -e.deltaY)));
+    var k = edZoom / nz;
+    edCx = mx + (edCx - mx) * k;
+    edCy = my + (edCy - my) * k;
+    edZoom = nz;
+    renderEditor();
+  }, { passive: false });
+
+  var pan = null;
+  edSvg.addEventListener('pointerdown', function (e) {
+    pan = { sx: e.clientX, sy: e.clientY, cx: edCx, cy: edCy };
+    window.addEventListener('pointermove', onPan);
+    window.addEventListener('pointerup', onPanUp);
+  });
+  function onPan(e) {
+    if (!pan) return;
+    var r = edSvg.getBoundingClientRect(), vb = edSvg.viewBox.baseVal;
+    var dx = (e.clientX - pan.sx) * (vb.width / r.width);
+    var dy = (e.clientY - pan.sy) * (vb.height / r.height);
+    edCx = pan.cx - dx; edCy = pan.cy - dy;
+    renderEditor();
+  }
+  function onPanUp() {
+    pan = null;
+    window.removeEventListener('pointermove', onPan);
+    window.removeEventListener('pointerup', onPanUp);
+  }
+
+  var drag = null;
+  function userDelta(dx, dy) {
+    var r = edSvg.getBoundingClientRect(), vb = edSvg.viewBox.baseVal;
+    return [dx * (vb.width / r.width), dy * (vb.height / r.height)];
+  }
+  function startDrag(e, idx, mode) {
+    e.preventDefault(); e.stopPropagation();
+    pushUndo();
+    state.activeNode = idx;
+    var n = effNodes(state.selected)[idx];
+    drag = { idx: idx, mode: mode, L: state.selected, sx: e.clientX, sy: e.clientY, start: n.slice() };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    renderEditor();
+  }
+  function onMove(e) {
+    if (!drag) return;
+    var d = userDelta(e.clientX - drag.sx, e.clientY - drag.sy);
+    var base = FLAT[drag.L].nodes[drag.idx], cur;
+    if (drag.mode === 'move') cur = [drag.start[0] + d[0], drag.start[1] + d[1], drag.start[2]];
+    else cur = [drag.start[0], drag.start[1], Math.max(2, drag.start[2] + d[0] / state.mass)];
+    setOverride(drag.L, drag.idx, [cur[0] - base[0], cur[1] - base[1], cur[2] - base[2]]);
+    if (state.mirror) {
+      var m = MIRROR[drag.L][drag.idx];
+      if (m !== drag.idx) {
+        var mb = FLAT[drag.L].nodes[m];
+        setOverride(drag.L, m, [(GW - cur[0]) - mb[0], cur[1] - mb[1], cur[2] - mb[2]]);
+      }
+    }
+    readout.textContent = (drag.mode === 'radius' ? 'radius ' + cur[2].toFixed(1) : 'x ' + Math.round(cur[0]) + '   y ' + Math.round(cur[1]))
+      + (state.globalEdit ? '   · global' : '') + (state.mirror ? '   · mirrored' : '');
+    schedule();
+  }
+  function onUp() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    drag = null;
+  }
+
+  var queued = false;
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () {
+      queued = false;
+      refreshDefs();          // instances are <use>, so this updates every preview
+      renderEditor();
+      renderGlyphSet();
+    });
+  }
+
+  function pushUndo() {
+    // snapshots overrides plus the currently-selected letter's node structure,
+    // since Add/Delete Node mutate FLAT[L] directly (not just overrides)
+    undoStack.push({
+      g: JSON.stringify(globalOv), l: JSON.stringify(letterOv),
+      L: state.selected, flat: JSON.stringify(FLAT[state.selected]),
+    });
+    if (undoStack.length > 60) undoStack.shift();
+    updateUndo();
+  }
+  function undo() {
+    if (!undoStack.length) return;
+    var s = undoStack.pop();
+    globalOv = JSON.parse(s.g); letterOv = JSON.parse(s.l);
+    FLAT[s.L] = JSON.parse(s.flat);
+    MIRROR[s.L] = computeMirrorMap(s.L);
+    if (state.activeNode >= FLAT[state.selected].nodes.length) state.activeNode = -1;
+    globalVer++; Object.keys(letterVer).forEach(function (k) { letterVer[k]++; });
+    schedule();
+  }
+  function updateUndo() {
+    var b = $('btnUndo');
+    if (undoStack.length) b.removeAttribute('disabled'); else b.setAttribute('disabled', 'true');
+  }
+  function selectLetter(L) {
+    if (!BASE[L]) return;
+    state.selected = L; state.activeNode = -1;
+    renderEditor();
+    glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (c) {
+      c.classList.toggle('selected', c.dataset.letter === L);
+    });
+  }
+
+  // -------------------------------------------------- structural node edits
+  // bakes current effective (overridden) node positions into FLAT[L] as the
+  // new base, clearing that letter's overrides — needed before any
+  // insert/delete since those resize the node array and would otherwise
+  // desync the index-keyed override maps.
+  function commitLetterNodes(L) {
+    var eff = effNodes(L);
+    FLAT[L] = { nodes: eff.map(function (n) { return n.slice(); }), lens: FLAT[L].lens.slice() };
+    if (letterOv[L]) delete letterOv[L];
+    letterVer[L]++;
+  }
+  function chainRangeOf(L, idx) {
+    var lens = FLAT[L].lens, k = 0;
+    for (var i = 0; i < lens.length; i++) {
+      if (idx >= k && idx < k + lens[i]) return { ci: i, cs: k, ce: k + lens[i] - 1 };
+      k += lens[i];
+    }
+    return null;
+  }
+  function addNode() {
+    var L = state.selected, idx = state.activeNode;
+    if (idx < 0) return;
+    var rng = chainRangeOf(L, idx);
+    if (!rng) return;
+    var eff = effNodes(L);
+    var partner = idx < rng.ce ? idx + 1 : (idx > rng.cs ? idx - 1 : -1);
+    var nn, insertAt;
+    if (partner === -1) {
+      var a = eff[idx];
+      nn = [a[0] + 4, a[1] + 4, a[2]];
+      insertAt = idx + 1;
+    } else {
+      var a2 = eff[idx], b2 = eff[partner];
+      nn = [(a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2, (a2[2] + b2[2]) / 2];
+      insertAt = Math.min(idx, partner) + 1;
+    }
+    pushUndo();
+    commitLetterNodes(L);
+    FLAT[L].nodes.splice(insertAt, 0, nn);
+    FLAT[L].lens[rng.ci] += 1;
+    MIRROR[L] = computeMirrorMap(L);
+    state.activeNode = insertAt;
+    letterVer[L]++;
+    schedule();
+    toast('Node added — drag it to shape the curve');
+  }
+  function deleteNode() {
+    var L = state.selected, idx = state.activeNode;
+    if (idx < 0) return;
+    var rng = chainRangeOf(L, idx);
+    if (!rng || rng.ce - rng.cs + 1 <= 2) { toast('This chain needs at least 2 nodes'); return; }
+    pushUndo();
+    commitLetterNodes(L);
+    FLAT[L].nodes.splice(idx, 1);
+    FLAT[L].lens[rng.ci] -= 1;
+    MIRROR[L] = computeMirrorMap(L);
+    state.activeNode = -1;
+    letterVer[L]++;
+    schedule();
+    toast('Node removed');
+  }
+
+  // ---------------------------------------------------------- node inspector
+  function updateNodeInspector() {
+    var L = state.selected, idx = state.activeNode;
+    var has = idx >= 0 && idx < FLAT[L].nodes.length;
+    [nodeXEl, nodeYEl, nodeREl, addNodeBtn, delNodeBtn].forEach(function (el) {
+      if (has) el.removeAttribute('disabled'); else el.setAttribute('disabled', 'true');
+    });
+    if (!has) { nodeXEl.value = ''; nodeYEl.value = ''; nodeREl.value = ''; return; }
+    var n = effNodes(L)[idx];
+    if (document.activeElement !== nodeXEl) nodeXEl.value = n[0].toFixed(1);
+    if (document.activeElement !== nodeYEl) nodeYEl.value = n[1].toFixed(1);
+    if (document.activeElement !== nodeREl) nodeREl.value = n[2].toFixed(1);
+  }
+  function applyNodeField() {
+    var L = state.selected, idx = state.activeNode;
+    if (idx < 0) return;
+    var base = FLAT[L].nodes[idx];
+    var x = parseFloat(nodeXEl.value), y = parseFloat(nodeYEl.value), r = Math.max(2, parseFloat(nodeREl.value));
+    if (isNaN(x) || isNaN(y) || isNaN(r)) return;
+    pushUndo();
+    setOverride(L, idx, [x - base[0], y - base[1], r - base[2]]);
+    if (state.mirror) {
+      var m = MIRROR[L][idx];
+      if (m !== idx) {
+        var mb = FLAT[L].nodes[m];
+        setOverride(L, m, [(GW - x) - mb[0], y - mb[1], r - mb[2]]);
+      }
+    }
+    schedule();
+  }
+  [nodeXEl, nodeYEl, nodeREl].forEach(function (el) { el.addEventListener('change', applyNodeField); });
+  addNodeBtn.addEventListener('click', addNode);
+  delNodeBtn.addEventListener('click', deleteNode);
+
+  // ---------------------------------------------------------------- controls
+  function bind(id, valId, key, fmt) {
+    var el = $(id);
+    el.value = state[key];
+    $(valId).textContent = fmt ? fmt(state[key]) : state[key];
+    el.addEventListener('input', function () {
+      state[key] = parseFloat(el.value);
+      $(valId).textContent = fmt ? fmt(state[key]) : state[key];
+      schedule();
+    });
+  }
+  var f1 = function (v) { return v.toFixed(1); }, f2 = function (v) { return v.toFixed(2); };
+  bind('sldMass', 'valMass', 'mass', f2);
+  bind('sldMelt', 'valMelt', 'melt', null);
+  bind('sldTension', 'valTension', 'tension', f1);
+  bind('sldWobble', 'valWobble', 'wobble', f1);
+  bind('sldSmooth', 'valSmooth', 'smooth', null);
+
+  function toggle(id, key) {
+    var b = $(id);
+    b.addEventListener('click', function () { state[key] = !state[key]; b.classList.toggle('active', state[key]); });
+  }
+  toggle('btnGlobalEdit', 'globalEdit');
+  toggle('btnMirror', 'mirror');
+  $('btnUndo').addEventListener('click', undo);
+  $('btnResetGlyph').addEventListener('click', function () {
+    pushUndo(); delete letterOv[state.selected]; letterVer[state.selected]++;
+    schedule(); toast('Glyph reset');
+  });
+  $('btnReseed').addEventListener('click', function () {
+    state.seed = Math.floor(Math.random() * 100000);
+    $('seedLabel').textContent = '#' + state.seed;
+    schedule();
+  });
+  $('seedLabel').textContent = '#' + state.seed;
+
+  $('btnAddBlock').addEventListener('click', function () {
+    state.blocks.push({ id: ++uid, text: 'NEW PREVIEW BLOCK', size: 72, lh: 120, tr: 0.01, paper: false, editing: false });
+    renderTesters();
+  });
+
+  $('presetSelect').addEventListener('change', function (e) {
+    var p = PRESETS[e.target.value]; if (!p) return;
+    state.preset = e.target.value;
+    Object.keys(p).forEach(function (k) { state[k] = p[k]; });
+    syncShape(); schedule();
+  });
+  function syncShape() {
+    $('sldMass').value = state.mass; $('valMass').textContent = f2(state.mass);
+    $('sldMelt').value = state.melt; $('valMelt').textContent = state.melt;
+    $('sldTension').value = state.tension; $('valTension').textContent = f1(state.tension);
+    $('sldWobble').value = state.wobble; $('valWobble').textContent = f1(state.wobble);
+    $('sldSmooth').value = state.smooth; $('valSmooth').textContent = state.smooth;
+  }
+
+  $('fontNameInput').addEventListener('input', function (e) {
+    state.fontName = e.target.value || 'Untitled';
+    testerList.querySelectorAll('[data-role=name]').forEach(function (n) { n.textContent = state.fontName; });
+  });
+
+  var sw = $('swatchRow');
+  PALETTE.forEach(function (c) {
+    var b = document.createElement('button');
+    b.className = 'swatch' + (c === state.ink ? ' active' : '');
+    b.style.background = c;
+    b.addEventListener('click', function () {
+      state.ink = c;
+      sw.querySelectorAll('.swatch').forEach(function (s) { s.classList.remove('active'); });
+      b.classList.add('active');
+      repaintAllTesters(); renderGlyphSet();
+    });
+    sw.appendChild(b);
+  });
+  $('glyphCountMeta').textContent = Object.keys(BASE).length + ' glyphs';
+
+  // ----------------------------------------------------------------- exports
+  function buildSVG() {
+    var b = state.blocks[0] || { text: 'OOZE', size: 140, tr: 0.01 };
+    var size = b.size, scale = size / GH, gap = b.tr * size;
+    var x = 40, y = 40, out = '', maxX = 0, maxW = 1700, lh = size * 1.25;
+    var txt = b.text;
+    for (var i = 0; i < txt.length; i++) {
+      var ch = txt[i];
+      if (/\s/.test(ch)) { x += SPACE * scale + gap; continue; }
+      var L = ch.toUpperCase(); if (!BASE[L]) continue;
+      var rings = ringsOf(L), bb = inkBounds(rings);
+      var w = (bb[1] - bb[0] + SIDE * 2) * scale;
+      if (x + w > maxW) { x = 40; y += lh; }
+      out += '<path d="' + ringsToD(rings) + '" transform="translate(' + (x - (bb[0] - SIDE) * scale) + ',' + y + ') scale(' + scale + ')" fill="' + (state.ink === '#000000' ? '#000' : state.ink) + '" fill-rule="nonzero"/>';
+      x += w + gap;
+      if (x > maxX) maxX = x;
+    }
+    var tw = Math.min(maxW, maxX) + 40, th = y + size + 40;
+    var bg = state.ink === '#000000' ? '#ffffff' : '#000000';
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + tw + '" height="' + th + '" viewBox="0 0 ' + tw + ' ' + th + '"><rect width="100%" height="100%" fill="' + bg + '"/>' + out + '</svg>';
+  }
+  function dl(blob, name) {
+    var u = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = u; a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+  }
+  function safeName() {
+    return (state.fontName || 'font').trim().replace(/[^a-z0-9\-_]+/gi, '-').toLowerCase() || 'font';
+  }
+  $('btnExportSvg').addEventListener('click', function () {
+    dl(new Blob([buildSVG()], { type: 'image/svg+xml' }), safeName() + '.svg'); toast('SVG exported');
+  });
+  $('btnExportPng').addEventListener('click', function () {
+    var s = buildSVG(), img = new Image();
+    var u = URL.createObjectURL(new Blob([s], { type: 'image/svg+xml;charset=utf-8' }));
+    img.onload = function () {
+      var m = s.match(/width="([\d.]+)" height="([\d.]+)"/);
+      var w = m ? +m[1] : img.width, h = m ? +m[2] : img.height, f = 2;
+      var c = document.createElement('canvas');
+      c.width = w * f; c.height = h * f;
+      var g = c.getContext('2d'); g.scale(f, f); g.drawImage(img, 0, 0, w, h);
+      c.toBlob(function (bl) { dl(bl, safeName() + '.png'); toast('PNG exported'); });
+      URL.revokeObjectURL(u);
+    };
+    img.onerror = function () { toast('PNG export failed'); URL.revokeObjectURL(u); };
+    img.src = u;
+  });
+  $('btnExportOtf').addEventListener('click', function () {
+    var b = $('btnExportOtf'), lbl = b.textContent;
+    b.setAttribute('disabled', 'true'); b.textContent = 'Pouring…';
+    setTimeout(function () {
+      try { buildOtf(); toast('OTF exported — install it like any font file'); }
+      catch (e) { console.error(e); toast('OTF export failed: ' + e.message, 4000); }
+      finally { b.removeAttribute('disabled'); b.textContent = lbl; }
+    }, 30);
+  });
+  function buildOtf() {
+    var UPM = 1000, SC = UPM / GH;
+    var glyphs = [
+      new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: 600, path: new opentype.Path() }),
+      new opentype.Glyph({ name: 'space', unicode: 32, advanceWidth: Math.round(SPACE * SC), path: new opentype.Path() }),
+    ];
+    Object.keys(BASE).forEach(function (L) {
+      var rings = ringsOf(L), bb = inkBounds(rings);
+      var path = new opentype.Path(), ox = -bb[0] + SIDE;
+      rings.forEach(function (r) {
+        path.moveTo((r[0][0] + ox) * SC, (GH - r[0][1]) * SC);
+        for (var i = 1; i < r.length; i++) path.lineTo((r[i][0] + ox) * SC, (GH - r[i][1]) * SC);
+        path.close();
+      });
+      glyphs.push(new opentype.Glyph({
+        name: L, unicode: L.charCodeAt(0),
+        advanceWidth: Math.round((bb[1] - bb[0] + SIDE * 2) * SC), path: path,
+      }));
+    });
+    var style = state.preset.charAt(0).toUpperCase() + state.preset.slice(1);
+    var font = new opentype.Font({
+      familyName: state.fontName || 'Untitled', styleName: style, unitsPerEm: UPM,
+      ascender: Math.round(UPM * 0.92), descender: -Math.round(UPM * 0.22), glyphs: glyphs,
+    });
+    dl(new Blob([font.toArrayBuffer()], { type: 'font/otf' }), safeName() + '.otf');
+  }
+
+  // -------------------------------------------------------------------- boot
+  syncShape();
+  refreshDefs();
+  renderTesters();
+  renderGlyphSet();
+  renderEditor();
+})();
+
+</script>
+</body>
+</html>
