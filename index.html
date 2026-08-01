@@ -320,6 +320,8 @@ select {
       <div class="swatch-row" id="swatchRow"></div>
       <div class="topbar-divider"></div>
       <div class="topbar-meta" id="glyphCountMeta">42 glyphs</div>
+      <div class="topbar-divider"></div>
+      <a class="text-btn" href="poster.html" title="Turn this font into a poster with a liquid echo effect">Poster tool &rarr;</a>
     </header>
 
     <main class="workspace">
@@ -779,6 +781,36 @@ select {
   }
 
   // ------------------------------------------------------------- main entry
+  // Shared tail of the pipeline: a scalar field + bounds go in, clean,
+  // correctly-wound, hole-punched rings come out. Used both by the capsule
+  // (hand-authored glyph) field below and by any other field a caller
+  // constructs (e.g. a rasterized/blurred canvas alpha channel).
+  function ringsFromField(field, bounds, o, debug) {
+    var segs = contour(field, bounds, o.res);
+    if (!segs.length) return [];
+    if (debug) {
+      var raw = stitch(segs, o.res * 0.05);
+      return { segs: segs.length, raw: raw.map(function (r) { return r.length; }),
+               rawRings: raw, bounds: bounds };
+    }
+    var rings = repairChains(stitch(segs, o.res * 0.05), o.res * 4)
+      .map(function (r) { return chaikin(r, o.smooth); })
+      .map(function (r) { return o.simplify > 0 ? decimateRing(r, o.simplify) : r; })
+      .filter(function (r) { return r.length > 5 && Math.abs(signedArea(r)) > 0.8; });
+
+    // Outer shells wound one way, counters the other, so a nonzero fill (what
+    // OpenType uses) punches the holes correctly.
+    return rings.map(function (r, i) {
+      var depth = 0;
+      for (var j = 0; j < rings.length; j++) {
+        if (j !== i && pointInRing(r[0], rings[j])) depth++;
+      }
+      var wantPositive = depth % 2 === 0;
+      var isPositive = signedArea(r) > 0;
+      return isPositive === wantPositive ? r : r.slice().reverse();
+    });
+  }
+
   function glyphRings(chains, opts) {
     var o = {
       mass: opts.mass == null ? 1 : opts.mass,
@@ -807,32 +839,29 @@ select {
     var bounds = [minX - pad, minY - pad, maxX + pad, maxY + pad];
 
     var field = makeField(caps, o);
-    var segs = contour(field, bounds, o.res);
-    if (!segs.length) return [];
-    if (opts._debug) {
-      var raw = stitch(segs, o.res * 0.05);
-      return { segs: segs.length, raw: raw.map(function (r) { return r.length; }),
-               rawRings: raw, bounds: bounds };
-    }
-    var rings = repairChains(stitch(segs, o.res * 0.05), o.res * 4)
-      .map(function (r) { return chaikin(r, o.smooth); })
-      .map(function (r) { return o.simplify > 0 ? decimateRing(r, o.simplify) : r; })
-      .filter(function (r) { return r.length > 5 && Math.abs(signedArea(r)) > 0.8; });
-
-    // Outer shells wound one way, counters the other, so a nonzero fill (what
-    // OpenType uses) punches the holes correctly.
-    return rings.map(function (r, i) {
-      var depth = 0;
-      for (var j = 0; j < rings.length; j++) {
-        if (j !== i && pointInRing(r[0], rings[j])) depth++;
-      }
-      var wantPositive = depth % 2 === 0;
-      var isPositive = signedArea(r) > 0;
-      return isPositive === wantPositive ? r : r.slice().reverse();
-    });
+    return ringsFromField(field, bounds, o, opts._debug);
   }
 
-  return { glyphRings: glyphRings, signedArea: signedArea };
+  // Generic entry point: trace any scalar field(x,y) -> number (negative =
+  // inside) over `bounds` = [x0,y0,x1,y1]. Lets callers build their own field
+  // (e.g. from a rasterized/blurred canvas) and still get the same
+  // marching-squares + stitch + repair + Chaikin + hole-punch treatment.
+  function traceField(field, bounds, opts) {
+    opts = opts || {};
+    var o = {
+      smooth: opts.smooth == null ? 2 : opts.smooth,
+      res: opts.res == null ? 1.7 : opts.res,
+      simplify: opts.simplify == null ? 0.3 : opts.simplify,
+    };
+    return ringsFromField(field, bounds, o, opts._debug);
+  }
+
+  return {
+    glyphRings: glyphRings,
+    signedArea: signedArea,
+    traceField: traceField,
+    valueNoise: valueNoise,
+  };
 });
 
 </script>

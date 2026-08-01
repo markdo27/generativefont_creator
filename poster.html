@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Liquid.Font — Poster generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Weights here must match the per-family weights in poster-engine.js
+     (MONO_FONTS), otherwise the canvas preview synthesises a weight the SVG
+     export does not embed. -->
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&family=IBM+Plex+Mono:wght@600&family=Space+Mono:wght@700&family=Roboto+Mono:wght@600&family=Fira+Code:wght@600&family=Courier+Prime:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="poster.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <a class="wordmark" href="index.html" style="text-decoration:none;color:inherit;">LIQUID<span>.</span>FONT</a>
+      <div class="topbar-divider"></div>
+      <div class="fontname-input" style="cursor:default;">Poster generator</div>
+      <div class="topbar-spacer"></div>
+      <a class="text-btn" href="index.html" title="Back to the glyph editor">&larr; Font tool</a>
+    </header>
+
+    <main class="poster-workspace">
+      <aside class="poster-sidebar">
+
+        <!-- ------------------------------------------------------ typeface -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">Typeface</h2>
+          <div class="seg-row" id="fontSourceRow">
+            <div class="pill-btn active" data-value="builtin">Liquid</div>
+            <div class="pill-btn" data-value="upload">Upload</div>
+          </div>
+
+          <div class="dropzone" id="fontDropzone">
+            <input type="file" id="fontFileInput" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" />
+            <span id="fontDropLabel">Drop a .ttf / .otf / .woff, or click to browse</span>
+          </div>
+
+          <div id="glyphControls">
+            <div class="pfield">
+              <label for="glyphPreset">Flow state</label>
+              <select class="pselect" id="glyphPreset">
+                <option value="liquid">Liquid</option>
+                <option value="mercury">Mercury</option>
+                <option value="acid">Acid</option>
+                <option value="molten">Molten</option>
+                <option value="bubble">Bubble</option>
+                <option value="goo">Goo</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div class="pgrid2">
+              <div class="pfield">
+                <label for="glyphMass">Weight <b id="valGlyphMass"></b></label>
+                <input type="range" id="glyphMass" min="0.6" max="1.5" step="0.01" />
+              </div>
+              <div class="pfield">
+                <label for="glyphMelt">Fuse <b id="valGlyphMelt"></b></label>
+                <input type="range" id="glyphMelt" min="0" max="40" step="1" />
+              </div>
+            </div>
+            <div class="pgrid2">
+              <div class="pfield">
+                <label for="glyphTension">Tension <b id="valGlyphTension"></b></label>
+                <input type="range" id="glyphTension" min="-12" max="8" step="0.5" />
+              </div>
+              <div class="pfield">
+                <label for="glyphWobble">Wobble <b id="valGlyphWobble"></b></label>
+                <input type="range" id="glyphWobble" min="0" max="8" step="0.1" />
+              </div>
+            </div>
+            <p class="phint">Reshapes the built-in letterforms themselves. Individual glyphs can be sculpted node-by-node in the <a href="index.html">Font tool</a>.</p>
+          </div>
+        </section>
+
+        <!-- ----------------------------------------------------- big title -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">
+            Big title
+            <button class="mini-btn" id="btnAddBigRow">+ Row</button>
+          </h2>
+          <div id="bigRowList" class="card-list"></div>
+          <p class="phint">Select a row to expand its settings. Drag the box on the canvas to move, corner handles to resize, the top handle to rotate.</p>
+        </section>
+
+        <!-- ---------------------------------------------------- small text -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">
+            Small text
+            <button class="mini-btn" id="btnAddSmallBlock">+ Text</button>
+          </h2>
+          <div id="smallBlockList" class="card-list"></div>
+        </section>
+
+        <!-- -------------------------------------------------------- output -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">Merge &amp; finish</h2>
+          <div class="pgrid2">
+            <div class="pfield">
+              <label for="melt">Melt <b id="valMelt"></b></label>
+              <input type="range" id="melt" min="0" max="40" step="1" />
+            </div>
+            <div class="pfield">
+              <label for="tension">Tension <b id="valTension"></b></label>
+              <input type="range" id="tension" min="-30" max="30" step="1" />
+            </div>
+          </div>
+          <div class="pgrid2">
+            <div class="pfield">
+              <label for="wobble">Wobble <b id="valWobble"></b></label>
+              <input type="range" id="wobble" min="0" max="10" step="0.1" />
+            </div>
+            <div class="pfield">
+              <label for="grain">Grain <b id="valGrain"></b></label>
+              <input type="range" id="grain" min="0.01" max="0.15" step="0.005" />
+            </div>
+          </div>
+          <div class="pgrid2">
+            <div class="pfield">
+              <label for="smooth">Smooth <b id="valSmooth"></b></label>
+              <input type="range" id="smooth" min="0" max="4" step="1" />
+            </div>
+            <div class="pfield">
+              <label for="strokeWidth">Stroke <b id="valStroke"></b></label>
+              <input type="range" id="strokeWidth" min="0.5" max="6" step="0.25" />
+            </div>
+          </div>
+          <div class="prow prow-baseline">
+            <span class="phint">Noise seed <b id="valSeed"></b></span>
+            <span class="spacer"></span>
+            <button class="text-btn" id="btnReseed">Restir &#8635;</button>
+          </div>
+          <p class="phint">Outline / filled and the line effect are set per row, under Big title.</p>
+        </section>
+
+        <!-- -------------------------------------------------------- canvas -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">Canvas</h2>
+          <div class="pfield">
+            <label for="canvasPreset">Poster size</label>
+            <select class="pselect" id="canvasPreset">
+              <option value="square">Square — 1:1</option>
+              <option value="portrait" selected>Portrait — 3:4</option>
+              <option value="tall">Story — 9:16</option>
+              <option value="landscape">Landscape — 4:3</option>
+              <option value="custom">Custom&hellip;</option>
+            </select>
+          </div>
+          <div class="pgrid2" id="customSizeRow" hidden>
+            <div class="pfield"><label for="canvasW">Width</label><input type="number" class="pnum" id="canvasW" value="1000" step="10" /></div>
+            <div class="pfield"><label for="canvasH">Height</label><input type="number" class="pnum" id="canvasH" value="1333" step="10" /></div>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------- palette -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">Palette</h2>
+          <div class="pair-grid" id="pairPalette"></div>
+
+          <div class="pfield">
+            <label>Title ink <b id="valInk"></b></label>
+            <div class="swatch-grid" id="inkPalette"></div>
+          </div>
+
+          <div class="pfield">
+            <label>Background <b id="valBg"></b></label>
+            <div class="swatch-grid" id="bgPalette"></div>
+          </div>
+
+          <div class="prow prow-baseline">
+            <label class="check-row" for="bgTransparent"><input type="checkbox" id="bgTransparent" /> No background</label>
+            <span class="spacer"></span>
+            <label class="swatch-pick" title="Custom title ink">
+              <input type="color" id="inkColor" value="#141414" /><span>Ink</span>
+            </label>
+            <label class="swatch-pick" title="Custom background">
+              <input type="color" id="bgColor" value="#f5f2ec" /><span>BG</span>
+            </label>
+          </div>
+        </section>
+
+      </aside>
+
+      <section class="poster-stage" id="posterStage">
+        <div class="stage-bar">
+          <div class="stage-meta" id="stageMeta"></div>
+          <div class="stage-spacer"></div>
+          <div class="zoom-cluster">
+            <button class="mini-btn" id="btnZoomOut" title="Zoom out">&minus;</button>
+            <input type="range" id="zoomRange" min="5" max="200" step="1" title="Zoom" />
+            <b class="zoom-val" id="valZoom">50%</b>
+            <button class="mini-btn" id="btnZoomIn" title="Zoom in">+</button>
+            <button class="mini-btn" id="btnZoomFit" title="Fit the poster in the window">Fit</button>
+            <button class="mini-btn" id="btnZoom100" title="Zoom to actual pixel size">100%</button>
+          </div>
+        </div>
+        <div class="stage-scroll" id="stageScroll">
+          <div class="canvas-holder" id="canvasHolder">
+            <canvas id="posterCanvas"></canvas>
+            <canvas id="overlayCanvas"></canvas>
+          </div>
+        </div>
+        <div class="stage-loading" id="stageLoading">Rendering&hellip;</div>
+        <div class="stage-hint" id="stageHint">Drag to move &middot; corners resize &middot; top handle rotates &middot; drag empty space to pan &middot; &#8984;/Ctrl + scroll to zoom</div>
+      </section>
+    </main>
+
+    <footer class="control-bar">
+      <div class="select-group">
+        <label for="exportScale">Export scale</label>
+        <select class="export-scale-select" id="exportScale">
+          <option value="1">1&times;</option>
+          <option value="2" selected>2&times;</option>
+          <option value="3">3&times;</option>
+        </select>
+      </div>
+      <div class="control-spacer"></div>
+      <div class="export-group">
+        <button class="export-btn secondary" id="btnExportSvg">SVG</button>
+        <button class="export-btn" id="btnExportPng">PNG</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+  <script src="blob-engine.js"></script>
+  <script src="glyphs_meta.js"></script>
+  <script src="poster-engine.js"></script>
+</body>
+</html>
