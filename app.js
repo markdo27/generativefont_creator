@@ -513,7 +513,8 @@
     clearTimeout(resizeT);
     resizeT = setTimeout(repaintAllTesters, 160);   // long words re-fit the column
   });
-  function renderTesters() {
+  function renderTesters(focusBlock) {
+    var scroller = $('specimenScroll'), keep = scroller.scrollTop;
     testerList.innerHTML = '';
     state.blocks.forEach(function (b) { testerList.appendChild(buildTester(b)); });
     if (!state.blocks.length) {
@@ -521,6 +522,11 @@
       empty.className = 'empty-state';
       empty.textContent = 'No preview blocks. Add one below to type with your font.';
       testerList.appendChild(empty);
+    }
+    scroller.scrollTop = keep;   // rebuilding the list must not jump the view
+    if (focusBlock) {
+      var i = state.blocks.indexOf(focusBlock), el = testerList.children[i];
+      if (el) { el.scrollIntoView({ block: 'nearest' }); var t = el.querySelector('.tester-text'); if (t) t.focus({ preventScroll: true }); }
     }
   }
 
@@ -549,7 +555,9 @@
 
   function buildTester(b) {
     var root = document.createElement('div');
-    root.className = 'tester' + (b.paper ? ' paper' : '');
+    // black ink would vanish on the black specimen, so it prints on paper
+    var onPaper = b.paper || state.ink === '#000000';
+    root.className = 'tester' + (onPaper ? ' paper' : '');
 
     var head = document.createElement('div');
     head.className = 'tester-head';
@@ -595,8 +603,9 @@
     del.setAttribute('aria-label', 'Remove this preview block');
     del.addEventListener('click', function () {
       pushUndo();
+      var at = state.blocks.indexOf(b);
       state.blocks = state.blocks.filter(function (x) { return x !== b; });
-      renderTesters(); markDirty();
+      renderTesters(state.blocks[Math.min(at, state.blocks.length - 1)]); markDirty();
       toast('Block removed — Ctrl/⌘ Z brings it back');
     });
     head.appendChild(del);
@@ -643,7 +652,7 @@
     holder.style.fontSize = b.size + 'px';
     // stacked marks on the first line need headroom the leading doesn't give
     if (/[\u0300-\u036f]/.test(b.text.normalize('NFD'))) holder.style.paddingTop = (0.2 * b.size).toFixed(1) + 'px';
-    holder.style.color = b.paper ? '#000' : state.ink;
+    holder.style.color = b.paper || state.ink === '#000000' ? '#000' : state.ink;
     holder.title = 'Click to edit this text';
     holder.tabIndex = 0;
     holder.setAttribute('role', 'button');
@@ -1459,8 +1468,9 @@
 
   $('btnAddBlock').addEventListener('click', function () {
     pushUndo();
-    state.blocks.push(block('NEW PREVIEW BLOCK', 120, 120, 0.01));
-    renderTesters(); markDirty();
+    var nb = block('NEW PREVIEW BLOCK', 120, 120, 0.01);
+    state.blocks.push(nb);
+    renderTesters(nb); markDirty();
   });
   // proofing strings a type designer reaches for
   var PROOFS = {
@@ -1527,27 +1537,34 @@
   });
 
   var sw = $('swatchRow');
+  // built once and updated in place, so the swatch you pressed keeps focus
   function renderSwatches() {
-    sw.innerHTML = '';
-    PALETTE.forEach(function (c) {
+    if (!sw.children.length) PALETTE.forEach(function (c) {
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'swatch' + (c === state.ink ? ' active' : '');
+      b.className = 'swatch';
+      b.dataset.ink = c;
       b.style.background = c;
-      b.setAttribute('aria-label', 'Ink colour ' + c);
-      b.setAttribute('aria-pressed', String(c === state.ink));
+      b.setAttribute('aria-label', 'Ink colour ' + c + (c === '#000000' ? ' (previews switch to paper)' : ''));
       b.addEventListener('click', function () {
         state.ink = c;
         renderSwatches();
-        repaintAllTesters(); refreshGlyphSet(); markDirty();
+        renderTesters(); refreshGlyphSet(); markDirty();
       });
       sw.appendChild(b);
+    });
+    Array.prototype.forEach.call(sw.children, function (b) {
+      var on = b.dataset.ink === state.ink;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', String(on));
     });
   }
   renderSwatches();
   function updateCoverage() {
     var v = VIET.filter(canDraw).length, l = LATIN.filter(canDraw).length;
-    $('glyphCountMeta').textContent = (LETTERS.length + v + l) + ' glyphs · Việt ' + v + '/' + VIET.length + ' · Latin +' + l;
+    var txt = (LETTERS.length + v + l) + ' glyphs · Việt ' + v + '/' + VIET.length + ' · Latin +' + l;
+    $('glyphCountMeta').textContent = txt;
+    $('glyphsetCoverage').textContent = txt;
   }
 
   // ------------------------------------------------------------ persistence

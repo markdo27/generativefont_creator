@@ -415,10 +415,12 @@ select {
     background: var(--surface); box-shadow: -14px 0 14px -6px var(--surface); z-index: 2;
   }
   .topbar { overflow-x: auto; }
-  .save-state { max-width: 130px; }
+  /* coverage lives in the character-set header too; keep Keys/About on screen */
+  #glyphCountMeta, #glyphCountMeta + .topbar-divider { display: none; }
+  .save-state { max-width: 150px; }
 }
 @media (max-width: 900px) {
-  html { overflow: auto; height: auto; }
+  html { overflow: auto; height: auto; scroll-padding-bottom: 130px; }   /* focus never hides under the sticky bar */
   body { overflow: visible; height: auto; }
   #app { height: auto; min-height: 100vh; width: 100%; }
   .topbar { gap: 10px; padding: 0 12px; }
