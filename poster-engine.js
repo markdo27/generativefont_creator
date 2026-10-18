@@ -116,32 +116,50 @@
     return b;
   }
 
-  var state = {
-    fontSource: 'builtin', uploadedFont: null, uploadedFontName: '',
-    glyph: { preset: 'liquid', mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
-
-    // Filled, so the first thing on screen is as solid as the Font tool's
-    // specimen; the Vietnamese subhead ("night tempo") shows the composed
-    // accents and the second title style without crowding the headline.
-    bigRows: [
+  // Filled, so the first thing on screen is as solid as the Font tool's
+  // specimen; the Vietnamese subhead ("night tempo") shows the composed
+  // accents and the second title style without crowding the headline.
+  // `fit` asks for an auto size at boot (a fraction of the poster width).
+  function defaultRows() {
+    return [
       makeRow({ text: 'TEMPO', mode: 'filled', yp: 41, fit: 0.8 }),
       makeRow({
         text: 'NHỊP ĐÊM', yp: 62, fit: 0.56,
         style: 'ink', mode: 'filled', flow: 12, slant: 6, weight: 0.7,
       }),
-    ],
-    smallBlocks: [
+    ];
+  }
+  function defaultBlocks() {
+    return [
       makeBlock({
         text: 'TEMPO CLUB / 00:00\n012KM NIGHT LOOP',
         align: 'right', xp: 94, yp: 7,
       }),
-    ],
-
+    ];
+  }
+  // Every scalar the poster composition is made of, with its stock value.
+  // Reset and restore both start from here.
+  var DEFAULTS = {
+    fontSource: 'builtin',
     seed: 5,
     melt: 8, tension: 2, wobble: 1.6, grain: 0.055, smooth: 2, strokeWidth: 1.5,
-
     canvasPreset: 'portrait', canvasW: 1000, canvasH: 1333,
     ink: '#141414', bg: '#f5f2ec', bgTransparent: false,
+  };
+
+  var state = {
+    fontSource: DEFAULTS.fontSource, uploadedFont: null, uploadedFontName: '',
+    glyph: { preset: 'liquid', mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
+
+    bigRows: defaultRows(),
+    smallBlocks: defaultBlocks(),
+
+    seed: DEFAULTS.seed,
+    melt: DEFAULTS.melt, tension: DEFAULTS.tension, wobble: DEFAULTS.wobble,
+    grain: DEFAULTS.grain, smooth: DEFAULTS.smooth, strokeWidth: DEFAULTS.strokeWidth,
+
+    canvasPreset: DEFAULTS.canvasPreset, canvasW: DEFAULTS.canvasW, canvasH: DEFAULTS.canvasH,
+    ink: DEFAULTS.ink, bg: DEFAULTS.bg, bgTransparent: DEFAULTS.bgTransparent,
 
     zoom: 0.5,
     selected: null, // {type:'row'|'block', id}
@@ -174,6 +192,7 @@
     if (txt != null) el.textContent = txt;
     return el;
   }
+  function wrapDeg(d) { return ((d + 180) % 360 + 360) % 360 - 180; }
   function findRow(id) { for (var i = 0; i < state.bigRows.length; i++) if (state.bigRows[i].id === id) return state.bigRows[i]; return null; }
   function findBlock(id) { for (var i = 0; i < state.smallBlocks.length; i++) if (state.smallBlocks[i].id === id) return state.smallBlocks[i]; return null; }
 
@@ -593,8 +612,72 @@
     return { base: bg, complete: complete };
   }
 
+  // A precomposed letter (Ấ, Ệ, ữ…) arrives as ONE glyph, so its accents would
+  // go through the row's Merge blur with the letter and — being the thinnest,
+  // most isolated ink — vanish: "TIẾNG VIỆT" came out "TIĖNG VIĖT", which
+  // changes the meaning. Its contours are sorted instead: any that sits wholly
+  // above the plain base letter (capped at the cap height) or wholly below the
+  // baseline is a floating mark and joins the unblurred mark layer, exactly as
+  // drawDecomposed's marks do. The font designer's own placement is kept, so a
+  // Vietnamese tone still sits beside its circumflex rather than on top of it.
+  // Attached parts (a horn, an ogonek) touch the letter and stay in the body.
+  function fontRefLines(font) {
+    if (font._lfLines) return font._lfLines;
+    var upm = font.unitsPerEm || 1000, os2 = font.tables && font.tables.os2;
+    var top = function (ch) { return glyphTopU(font, ch); };
+    var cap = os2 && os2.sCapHeight > 0 ? os2.sCapHeight : top('H') || upm * 0.7;
+    var xh = os2 && os2.sxHeight > 0 ? os2.sxHeight : top('x') || upm * 0.5;
+    font._lfLines = { cap: cap, xh: xh, markLine: Object.create(null) };
+    return font._lfLines;
+  }
+  // Top of a character's ink in font units (y up), or null when it has none.
+  function glyphTopU(font, ch) {
+    var i = cmapIndex(font, ch);
+    if (!i) return null;
+    var b = pathBox(font.glyphs.get(i).getPath(0, 0, font.unitsPerEm));   // 1 unit = 1 px
+    return b ? -b.y1 : null;
+  }
+  // Height (font units) a contour of `ch` must clear to count as a floating mark.
+  function markLineU(font, ch) {
+    var L = fontRefLines(font);
+    if (ch in L.markLine) return L.markLine[ch];
+    var cps = Array.from(ch.normalize('NFD')), line = L.cap;
+    if (cps.length > 1 && !/^\p{M}/u.test(cps[0])) {
+      var b = cps[0], t = null;
+      // i/j carry a tittle that is not an accent: measure their dotless forms
+      if (b === 'i' || b === 'j') t = glyphTopU(font, b === 'i' ? 'ı' : 'ȷ') || L.xh;
+      else t = glyphTopU(font, b);
+      if (t == null) t = b !== b.toUpperCase() ? L.xh : L.cap;
+      line = Math.min(t, L.cap);
+    }
+    L.markLine[ch] = line;
+    return line;
+  }
+  // Split one glyph's path commands into contours and route each to the body
+  // or the mark layer. `aboveY` / `belowY` are canvas y (y down).
+  function routeContours(cmds, aboveY, belowY, body, marks) {
+    var cur = null, y0 = 1e9, y1 = -1e9;
+    function flush() {
+      if (cur && cur.length) {
+        var isMark = y0 <= y1 && (y1 <= aboveY || y0 >= belowY);
+        Array.prototype.push.apply(isMark ? marks : body, cur);
+      }
+      cur = null; y0 = 1e9; y1 = -1e9;
+    }
+    function see(y) { if (y != null) { if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+    for (var i = 0; i < cmds.length; i++) {
+      var c = cmds[i];
+      if (c.type === 'M') flush();
+      if (!cur) cur = [];
+      cur.push(c);
+      see(c.y); see(c.y1); see(c.y2);
+      if (c.type === 'Z') flush();
+    }
+    flush();
+  }
+
   function uploadRowGeom(font, text, size, trackingPx) {
-    var scale = size / font.unitsPerEm;
+    var scale = size / font.unitsPerEm, upm = font.unitsPerEm;
     var cmds = [], markCmds = [], missing = [];
     var x = 0, drawn = 0, total = 0;
     // whole code point clusters, never UTF-16 halves or detached marks
@@ -606,7 +689,12 @@
       var g;
       if (gi) {
         g = font.glyphs.get(gi);
-        Array.prototype.push.apply(cmds, g.getPath(x, 0, size).commands);
+        // the character actually drawn (glyphIndexFor may have uppercased it)
+        var drawnCh = cmapIndex(font, c) ? c : c.toUpperCase().normalize('NFC');
+        var line = markLineU(font, drawnCh);
+        // a little slack either side: an accent may kiss the line it clears
+        routeContours(g.getPath(x, 0, size).commands,
+          -(line - upm * 0.03) * scale, -upm * 0.01 * scale, cmds, markCmds);
         drawn++;
       } else {
         var d = drawDecomposed(font, c, x, size, cmds, markCmds);
@@ -815,6 +903,7 @@
     // reach ~0.3 em above the caps, a dot below ~0.15 em under the baseline):
     // typing an accent then never makes the row jump, and the selection box
     // and hit area always contain every mark.
+    var inkBox = bbox.slice();     // the real ink, before that padding
     if (band) {
       var mid = (band[0] + band[1]) / 2;
       var top = Math.min(bbox[1], 2 * mid - bbox[3]);
@@ -824,6 +913,7 @@
 
     var out = {
       bbox: bbox,
+      inkBox: inkBox,
       missing: geom.missing || [],
       empty: !!geom.empty,
       // part: 'base' (letters + ribbon), 'marks' (floating accents) or all
@@ -877,15 +967,49 @@
     });
     var upload = state.fontSource === 'upload';
     var sig = (upload ? 'u' + uploadVer : 'b' + srcVer) + '|' + (emptyRow ? emptyRow.id : '') + '|' + list.join('\u0000');
-    if (sig === lastMissing) return;
+    if (sig === lastMissing) return false;
     lastMissing = sig;
     if (emptyRow) {
       toast('"' + emptyRow.text.trim() + '" has no matching glyphs in ' + state.uploadedFontName + ' (even uppercased)', 3800);
-      return;
+      return true;
     }
-    if (!list.length) return;
+    if (!list.length) return false;
     var shown = list.slice(0, 14).map(showCluster).join(' ') + (list.length > 14 ? ' \u2026' : '');
     toast('Not in ' + (upload ? state.uploadedFontName || 'the uploaded font' : 'the built-in set') + ': ' + shown, 3600);
+    return true;
+  }
+
+  // Overflow notes on the row cards. Cheap (layouts are cached), so it runs on
+  // every paint, drags included; the toast is separate and fires once per row.
+  var rowWarnState = {};    // row id -> overflow kind last computed
+  var warnedRows = {};      // row ids already toasted about
+  function updateRowWarnings() {
+    var kinds = {};
+    buildRowLayouts().forEach(function (rl) { kinds[rl.row.id] = rowOverflow(rl); });
+    rowWarnState = kinds;
+    var cards = $('bigRowList').children;
+    for (var i = 0; i < cards.length; i++) {
+      var w = cards[i]._warn, k = kinds[cards[i]._id] || '';
+      if (!w || w._k === k) continue;
+      w._k = k;
+      w.textContent = k ? OVERFLOW_TEXT[k] : '';
+      w.title = k ? OVERFLOW_TIP[k] : '';
+      w.hidden = !k;
+    }
+  }
+  // The first time a row outgrows the poster, say so once. Returns true when
+  // it toasted, so callers don't stack it on top of another message.
+  function toastOverflowOnce() {
+    for (var i = 0; i < state.bigRows.length; i++) {
+      var row = state.bigRows[i], k = rowWarnState[row.id];
+      if ((k === 'wide' || k === 'tall') && !warnedRows[row.id]) {
+        warnedRows[row.id] = 1;
+        toast('Row ' + (i + 1) + ' is ' + (k === 'wide' ? 'wider' : 'taller') +
+          ' than the poster, so it is cropped', 3600);
+        return true;
+      }
+    }
+    return false;
   }
 
   // Each row placed so its ink bbox centre lands on the row's (xp,yp) point.
@@ -922,6 +1046,33 @@
     });
     return [x0, y0, x1, y1];
   }
+  // How a row's real ink meets the poster's edges, in poster terms (after
+  // rotation): 'wide' / 'tall' when no placement could fit it, 'edge' when it
+  // would fit but currently runs off an edge, '' when it is wholly on the
+  // poster. Nothing is changed automatically; the card and a toast just say so.
+  var OVERFLOW_TEXT = {
+    wide: '▲ wider than poster', tall: '▲ taller than poster', edge: '▲ off the edge',
+  };
+  var OVERFLOW_TIP = {
+    wide: 'This row is wider than the poster, so its ends are cropped. Reduce its size or tracking, or split it into two rows.',
+    tall: 'This row is taller than the poster, so it is cropped. Reduce its size.',
+    edge: 'Part of this row runs past the poster edge and is cropped. Move it inward if that is not intended.',
+  };
+  function rowOverflow(rl) {
+    var ib = rl.layout.inkBox;
+    if (!ib) return '';
+    var rad = (rl.row.rot || 0) * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+    var a = cornersAABB([[ib[0], ib[1]], [ib[2], ib[1]], [ib[2], ib[3]], [ib[0], ib[3]]].map(function (c) {
+      var lx = c[0] - rl.cx, ly = c[1] - rl.cy;
+      return [rl.px + lx * cos - ly * sin, rl.py + lx * sin + ly * cos];
+    }));
+    var W = state.canvasW, H = state.canvasH, tol = 1;
+    if (a[2] - a[0] > W + tol) return 'wide';
+    if (a[3] - a[1] > H + tol) return 'tall';
+    if (a[0] < -tol || a[2] > W + tol || a[1] < -tol || a[3] > H + tol) return 'edge';
+    return '';
+  }
+
   // Test in the row's own frame so rotation is handled by un-rotating the point.
   function pointInRow(p, rl, slack) {
     slack = slack || 0;
@@ -1264,8 +1415,10 @@
     drawContour(ctx, result);
     drawSmallBlocks(ctx);
     paintOverlay();
+    updateRowWarnings();
     $('stageMeta').textContent = W + ' × ' + H + ' px — ' +
-      (state.fontSource === 'upload' ? (state.uploadedFontName || 'no font uploaded')
+      (state.fontSource === 'upload'
+        ? (state.uploadedFontName || (restoredFontName ? 'upload ' + restoredFontName + ' again' : 'no font uploaded'))
         : linked() ? 'Font-tool glyphs' + (project.fontName ? ' (' + project.fontName + ')' : '') : 'Liquid (built-in)');
   }
 
@@ -1292,6 +1445,7 @@
     ctx.globalAlpha = 1;
     drawSmallBlocks(ctx);
     paintOverlay();
+    updateRowWarnings();
   }
 
   // Geometry of the selection widget, in poster units. Shared by the painter
@@ -1361,6 +1515,7 @@
   // -------------------------------------------------------------- scheduler
   var heavyTimer = null, dragging = false;
   function scheduleRender(heavy) {
+    schedulePersist();
     if (!heavy) { paint(cachedContour); return; }
     paintFast();
     clearTimeout(heavyTimer);
@@ -1372,7 +1527,7 @@
         catch (e) { console.error(e); cachedContour = null; }
         paint(cachedContour);
         $('stageLoading').classList.remove('show');
-        reportMissing();
+        if (!reportMissing()) toastOverflowOnce();
       }, 0);
     }, 130);
   }
@@ -1496,6 +1651,11 @@
 
       var head = cardHead(name, rowMetaText(row));
       card._meta = head._meta;
+      // overflow note (see updateRowWarnings); filled in after the cards exist
+      var warn = mk('span', 'row-warn');
+      warn.id = pre + 'warn'; warn.hidden = true;
+      head.insertBefore(warn, head._meta.nextSibling);
+      card._warn = warn;
       var up = fk(mk('button', 'icon-btn', '\u2191'), pre + 'up');
       up.type = 'button'; up.title = 'Move up';
       up.setAttribute('aria-label', 'Move ' + name.toLowerCase() + ' up');
@@ -1521,6 +1681,7 @@
       var txt = fk(document.createElement('input'), pre + 'text');
       txt.className = 'ptext compact'; txt.value = row.text; txt.spellcheck = false;
       txt.setAttribute('aria-label', name + ' text');
+      txt.setAttribute('aria-describedby', warn.id);
       txt.addEventListener('input', function () { row.text = txt.value; scheduleRender(true); });
       card.appendChild(txt);
 
@@ -1605,6 +1766,7 @@
       card.appendChild(body);
       list.appendChild(card);
     });
+    updateRowWarnings();
   }
 
   function renderSmallBlockCards() {
@@ -1909,7 +2071,7 @@
           var a = Math.atan2(p.y - drag.cy, p.x - drag.cx);
           var deg = drag.origRot + (a - drag.startAngle) * 180 / Math.PI;
           if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
-          drag.row.rot = ((deg + 180) % 360 + 360) % 360 - 180;
+          drag.row.rot = wrapDeg(deg);
           paintFast();
         }
         updateCardMeta();
@@ -1924,7 +2086,7 @@
         var heavy = drag.mode !== 'move' || drag.hit.type === 'row';
         drag = null; dragging = false;
         overlay.classList.remove('grabbing');
-        if (heavy) scheduleRender(true);
+        if (heavy) scheduleRender(true); else schedulePersist();
       }
       if (pan) { pan = null; scroll.classList.remove('panning'); }
     });
@@ -1948,7 +2110,7 @@
       else if (ev.key === 'ArrowUp') item.yp -= step;
       else if (ev.key === 'ArrowDown') item.yp += step;
       else if (isRow && (ev.key === '[' || ev.key === ']')) {
-        item.rot = (item.rot || 0) + (ev.key === '[' ? -1 : 1) * (ev.shiftKey ? 15 : 1);
+        item.rot = wrapDeg((item.rot || 0) + (ev.key === '[' ? -1 : 1) * (ev.shiftKey ? 15 : 1));
       } else moved = false;
       if (!moved) return;
       ev.preventDefault();
@@ -1960,8 +2122,9 @@
   // --------------------------------------------------------------- binding
   function bindRange(id, valId, get, set, fmt, heavy) {
     var el = $(id), val = valId ? $(valId) : null;
-    el.value = get();
-    if (val) val.textContent = fmt(get());
+    var sync = function () { el.value = get(); if (val) val.textContent = fmt(get()); };
+    sync();
+    rangeSyncs.push(sync);
     el.addEventListener('input', function () {
       var v = parseFloat(el.value);
       set(v);
@@ -2079,12 +2242,237 @@
   function refreshProject(force) {
     var had = !!project;
     if (!readProject() && !force) return;
-    if (project && !had) link.use = true;      // default ON whenever a project appears
+    // default ON whenever a project appears (at boot: whatever the saved poster said)
+    if (project && !had && !force) link.use = true;
     srcVer++;
     builtinCache = {}; layoutCache = {};
     applyLinkShape();
     updateProjectUI();
     if (!force) scheduleRender(true);
+  }
+
+  // ------------------------------------------------------------ persistence
+  // The composition (rows, small text, poster size and colours, typeface and
+  // finish settings) autosaves to this browser and comes back on reload. An
+  // uploaded font FILE is never stored, only its name, so the page can ask
+  // for it again. Like the Font-tool project the stored copy is untrusted:
+  // every field is type-checked and clamped, and a malformed field falls back
+  // to its default on its own instead of discarding the rest.
+  var POSTER_KEY = 'liquidfont.poster.v1';
+  var ROW_NUM = {
+    size: [20, 500], tracking: [-0.06, 0.5], xp: [-200, 300], yp: [-200, 300],
+    flow: [0, 46], slant: [-25, 25], weight: [0.15, 1.4], pocket: [0, 0.14],
+    gap: [1, 20], jitter: [0, 10], lines: [2, 14], spacing: [3, 40],
+  };
+  var ROW_ENUM = { style: ['melt', 'ink'], effect: ['solid', 'rough', 'contour'], mode: ['outline', 'filled'] };
+  var BLOCK_NUM = { size: [6, 72], lh: [90, 220], xp: [-200, 300], yp: [-200, 300] };
+  var BLOCK_KEYS = ['text', 'font', 'size', 'lh', 'align', 'xp', 'yp', 'color'];
+  var MERGE_NUM = {
+    melt: [0, 40], tension: [-30, 30], wobble: [0, 10], grain: [0.01, 0.15], smooth: [0, 4], strokeWidth: [0.5, 6],
+  };
+  var restoredFontName = '';   // an uploaded font the restored poster used, until it is uploaded again
+
+  function strOf(v, max) { return typeof v === 'string' ? v.slice(0, max) : null; }
+  function hexOf(v) { return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null; }
+  function pickKeys(o, keys) { var c = {}; keys.forEach(function (k) { c[k] = o[k]; }); return c; }
+
+  function serializeComposition() {
+    var rowKeys = ['text', 'rot'].concat(Object.keys(ROW_NUM), Object.keys(ROW_ENUM));
+    // while the Font tool's shape is mirrored, the user's own one is parked in link.saved
+    var glyph = linked() && link.shape && link.saved ? link.saved.glyph : state.glyph;
+    return {
+      app: 'liquid.poster', version: 1,
+      fontSource: state.fontSource,
+      uploadedFontName: state.uploadedFontName || restoredFontName || '',
+      glyph: pickKeys(glyph, ['preset'].concat(SHAPE_KEYS)),
+      link: { use: link.use, shape: link.shape },
+      seed: state.seed,
+      merge: pickKeys(state, Object.keys(MERGE_NUM)),
+      canvas: { preset: state.canvasPreset, w: state.canvasW, h: state.canvasH },
+      palette: { ink: state.ink, bg: state.bg, transparent: state.bgTransparent },
+      rows: state.bigRows.map(function (r) { return pickKeys(r, rowKeys); }),
+      blocks: state.smallBlocks.map(function (b) { return pickKeys(b, BLOCK_KEYS); }),
+    };
+  }
+
+  function validRow(o) {
+    if (!o || typeof o !== 'object') return null;
+    var text = strOf(o.text, 200);
+    if (text == null) return null;
+    var over = { text: text };
+    Object.keys(ROW_NUM).forEach(function (k) { if (finite(o[k])) over[k] = clampTo(o[k], ROW_NUM[k]); });
+    Object.keys(ROW_ENUM).forEach(function (k) { if (ROW_ENUM[k].indexOf(o[k]) >= 0) over[k] = o[k]; });
+    if (finite(o.rot)) over.rot = wrapDeg(o.rot);
+    if (over.lines != null) over.lines = Math.round(over.lines);
+    return makeRow(over);
+  }
+  function validBlock(o) {
+    if (!o || typeof o !== 'object') return null;
+    var text = strOf(o.text, 2000);
+    if (text == null) return null;
+    var over = { text: text };
+    Object.keys(BLOCK_NUM).forEach(function (k) { if (finite(o[k])) over[k] = clampTo(o[k], BLOCK_NUM[k]); });
+    if (MONO_FONTS.some(function (f) { return f[0] === o.font; })) over.font = o.font;
+    if (['left', 'center', 'right'].indexOf(o.align) >= 0) over.align = o.align;
+    if (hexOf(o.color)) over.color = hexOf(o.color);
+    return makeBlock(over);
+  }
+  function validateComposition(p) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+    if (p.app !== 'liquid.poster' || p.version !== 1) return null;
+    var out = {};
+    if (Array.isArray(p.rows)) {
+      var rows = p.rows.slice(0, 24).map(validRow).filter(Boolean);
+      if (rows.length) out.rows = rows;          // a poster always keeps at least one title row
+    }
+    // no small text at all is a legitimate choice
+    if (Array.isArray(p.blocks)) out.blocks = p.blocks.slice(0, 40).map(validBlock).filter(Boolean);
+    if (p.fontSource === 'builtin' || p.fontSource === 'upload') out.fontSource = p.fontSource;
+    var nm = strOf(p.uploadedFontName, 120);
+    if (nm) out.uploadedFontName = nm;
+    if (p.glyph && typeof p.glyph === 'object') {
+      var g = {}, n = 0;
+      SHAPE_KEYS.forEach(function (k) {
+        if (finite(p.glyph[k])) { g[k] = clampTo(p.glyph[k], SHAPE_LIMITS[k]); n++; }
+      });
+      if (n) {
+        var pr = p.glyph.preset;
+        g.preset = typeof pr === 'string' && hasOwn(presetTable(), pr) ? pr : 'custom';
+        out.glyph = g;
+      }
+    }
+    if (p.link && typeof p.link === 'object') out.link = { use: p.link.use !== false, shape: p.link.shape !== false };
+    if (finite(p.seed)) out.seed = Math.round(clampTo(p.seed, [0, 1e6]));
+    if (p.merge && typeof p.merge === 'object') {
+      var m = {};
+      Object.keys(MERGE_NUM).forEach(function (k) { if (finite(p.merge[k])) m[k] = clampTo(p.merge[k], MERGE_NUM[k]); });
+      if (m.smooth != null) m.smooth = Math.round(m.smooth);
+      out.merge = m;
+    }
+    if (p.canvas && typeof p.canvas === 'object') {
+      var cp = p.canvas.preset;
+      if (typeof cp === 'string' && hasOwn(SIZE_PRESETS, cp)) {
+        out.canvas = { preset: cp, w: SIZE_PRESETS[cp][0], h: SIZE_PRESETS[cp][1] };
+      } else if (cp === 'custom' && finite(p.canvas.w) && finite(p.canvas.h)) {
+        out.canvas = {
+          preset: 'custom',
+          w: Math.round(clampTo(p.canvas.w, [100, 10000])), h: Math.round(clampTo(p.canvas.h, [100, 10000])),
+        };
+      }
+    }
+    if (p.palette && typeof p.palette === 'object') {
+      out.palette = { ink: hexOf(p.palette.ink), bg: hexOf(p.palette.bg), transparent: p.palette.transparent === true };
+    }
+    return out;
+  }
+  function applyComposition(c) {
+    if (c.rows) state.bigRows = c.rows;
+    if (c.blocks) state.smallBlocks = c.blocks;
+    if (c.fontSource) state.fontSource = c.fontSource;
+    restoredFontName = c.fontSource === 'upload' && c.uploadedFontName ? c.uploadedFontName : '';
+    if (c.glyph) Object.keys(c.glyph).forEach(function (k) { state.glyph[k] = c.glyph[k]; });
+    if (c.link) { link.use = c.link.use; link.shape = c.link.shape; }
+    if (c.seed != null) state.seed = c.seed;
+    if (c.merge) Object.keys(c.merge).forEach(function (k) { state[k] = c.merge[k]; });
+    if (c.canvas) { state.canvasPreset = c.canvas.preset; state.canvasW = c.canvas.w; state.canvasH = c.canvas.h; }
+    if (c.palette) {
+      if (c.palette.ink) state.ink = c.palette.ink;
+      if (c.palette.bg) state.bg = c.palette.bg;
+      state.bgTransparent = c.palette.transparent;
+    }
+  }
+  // Read and apply the saved poster. Returns true when one was restored.
+  function restoreComposition() {
+    var raw = null, c = null;
+    try { raw = window.localStorage.getItem(POSTER_KEY); } catch (e) { return false; }
+    if (typeof raw !== 'string' || raw.length > 2e6) return false;
+    try { c = validateComposition(JSON.parse(raw)); } catch (e) { c = null; }
+    if (!c) return false;
+    applyComposition(c);
+    return true;
+  }
+
+  // Saves settle for a moment: a slider drag or a burst of typing is one write.
+  var persistTimer = null, persistReady = false;
+  function schedulePersist() {
+    if (!persistReady) return;            // nothing is written until boot has finished
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(savePoster, 400);
+  }
+  function savePoster() {
+    clearTimeout(persistTimer); persistTimer = null;
+    try { window.localStorage.setItem(POSTER_KEY, JSON.stringify(serializeComposition())); }
+    catch (e) { /* full, blocked or private mode: the poster still works, it just won't come back */ }
+  }
+  function flushPersist() { if (persistTimer) savePoster(); }
+
+  // Every sidebar control that mirrors state, refreshed from it in one go
+  // (boot after a restore, and Reset poster).
+  var rangeSyncs = [];
+  function syncSegRow(rowId, value) {
+    $(rowId).querySelectorAll('.pill-btn').forEach(function (b) {
+      var on = b.dataset.value === value;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  function syncControls() {
+    rangeSyncs.forEach(function (f) { f(); });
+    $('valSeed').textContent = '#' + state.seed;
+    syncSegRow('fontSourceRow', state.fontSource);
+    $('canvasPreset').value = state.canvasPreset;
+    $('customSizeRow').hidden = state.canvasPreset !== 'custom';
+    $('canvasW').value = state.canvasW; $('canvasH').value = state.canvasH;
+    $('inkColor').value = state.ink; $('bgColor').value = state.bg;
+    $('bgTransparent').checked = state.bgTransparent;
+    syncGlyphSliders();
+    updateFontSourceUI();
+    updateDropLabel();
+  }
+  function updateDropLabel() {
+    var label = $('fontDropLabel'), zone = $('fontDropzone');
+    if (state.uploadedFont) {
+      label.textContent = 'Loaded: ' + state.uploadedFontName + ' — click to replace.';
+    } else if (restoredFontName) {
+      // the poster came back but the font file could not (files are never stored)
+      label.textContent = 'Upload ' + restoredFontName + ' again to finish restoring this poster (font files aren’t saved), or click to browse.';
+    } else {
+      label.textContent = 'Drop a .ttf / .otf / .woff, or click to browse';
+    }
+    zone.classList.toggle('has-font', !!state.uploadedFont);
+    zone.classList.toggle('needs-font', !state.uploadedFont && !!restoredFontName);
+  }
+  // Sizes for rows that asked for one (`fit`): the stock rows, at boot or reset.
+  function fitPendingRows() {
+    state.bigRows.forEach(function (r) {
+      if (r.fit) { autoFitRowSize(r, r.fit); delete r.fit; }
+    });
+  }
+
+  function resetPoster() {
+    clearTimeout(persistTimer); persistTimer = null;
+    try { window.localStorage.removeItem(POSTER_KEY); } catch (e) { /* nothing stored, or storage blocked */ }
+    Object.keys(DEFAULTS).forEach(function (k) { state[k] = DEFAULTS[k]; });
+    state.bigRows = defaultRows(); state.smallBlocks = defaultBlocks();
+    state.selected = null;
+    restoredFontName = '';
+    // stock letter shape, and the Font-tool link back on (its default)
+    var lp = presetTable().liquid || {};
+    state.glyph = { preset: 'liquid' };
+    SHAPE_KEYS.forEach(function (k) { state.glyph[k] = finite(lp[k]) ? lp[k] : GLYPH_PRESETS.liquid[k]; });
+    link.use = true; link.shape = true; link.saved = null;
+    srcVer++;
+    builtinCache = {}; layoutCache = {};
+    applyLinkShape();
+    updateProjectUI();
+    warnedRows = {}; lastMissing = '';
+    fitPendingRows();
+    syncControls();
+    renderBigRowCards(); renderSmallBlockCards(); renderPalette();
+    zoomToFit();
+    scheduleRender(true);
+    clearTimeout(persistTimer); persistTimer = null;   // a reset poster is the stock one: nothing to store
+    toast('Poster reset to the starting layout');
   }
 
   function applyCanvasSize(w, h) {
@@ -2094,6 +2482,15 @@
   }
 
   function init() {
+    // -- built-in letterform shape
+    // start from the shared Liquid flow state, so the stock poster letters are
+    // the stock Font-tool letters
+    var lp = presetTable().liquid;
+    if (lp) SHAPE_KEYS.forEach(function (k) { if (finite(lp[k])) state.glyph[k] = lp[k]; });
+
+    // -- the poster from the last visit, before any control reads state
+    var restored = restoreComposition();
+
     // -- typeface
     bindSegRow('fontSourceRow', function () { return state.fontSource; },
       function (v) { state.fontSource = v; layoutCache = {}; }, true, updateFontSourceUI);
@@ -2116,10 +2513,10 @@
         try {
           var font = opentype.parse(e.target.result);
           state.uploadedFont = font; state.uploadedFontName = file.name;
+          restoredFontName = '';
           uploadVer++;
           layoutCache = {};
-          $('fontDropLabel').textContent = 'Loaded: ' + file.name + ' — click to replace.';
-          dropzone.classList.add('has-font');
+          updateDropLabel();
           var fam = (font.names && font.names.fontFamily && (font.names.fontFamily.en || Object.values(font.names.fontFamily)[0])) || file.name;
           toast('Font loaded: ' + fam);
           scheduleRender(true);
@@ -2131,11 +2528,6 @@
       reader.readAsArrayBuffer(file);
     }
 
-    // -- built-in letterform shape
-    // start from the shared Liquid flow state, so the stock poster letters are
-    // the stock Font-tool letters
-    var lp = presetTable().liquid;
-    if (lp) SHAPE_KEYS.forEach(function (k) { if (finite(lp[k])) state.glyph[k] = lp[k]; });
     $('glyphPreset').addEventListener('change', function (ev) {
       var name = ev.target.value;
       unmatchShape();
@@ -2269,15 +2661,42 @@
     $('btnExportPng').addEventListener('click', exportPng);
     $('btnExportSvg').addEventListener('click', exportSvg);
 
+    // -- saved poster
+    var resetBtn = $('btnResetPoster'), resetArm = null;
+    // two-step, no modal: the first press arms it, a second within 4 s resets
+    function disarmReset() {
+      clearTimeout(resetArm); resetArm = null;
+      resetBtn.textContent = 'Reset poster'; resetBtn.classList.remove('armed');
+    }
+    resetBtn.addEventListener('click', function () {
+      if (!resetArm) {
+        resetBtn.textContent = 'Click again to reset';
+        resetBtn.classList.add('armed');
+        resetArm = setTimeout(disarmReset, 4000);
+        return;
+      }
+      disarmReset();
+      resetPoster();
+    });
+    resetBtn.addEventListener('blur', disarmReset);
+    window.addEventListener('pagehide', flushPersist);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) flushPersist(); });
+
     // -- boot
-    state.bigRows.forEach(function (r) { autoFitRowSize(r, r.fit || 0.8); });
+    syncControls();
+    fitPendingRows();
     renderBigRowCards();
     cachedContour = computeContour(false);
     zoomToFit();
     paint(cachedContour);
-    reportMissing();
+    if (restored && state.fontSource === 'upload' && !state.uploadedFont && restoredFontName) {
+      toast('Poster restored. Upload ' + restoredFontName + ' again: font files aren\u2019t saved', 5000);
+    } else if (!reportMissing()) toastOverflowOnce();
+    // small text in a webfont that isn't loaded yet would draw in the fallback
+    state.smallBlocks.forEach(function (b) { loadFontThen(b, function () { paint(cachedContour); }); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { paint(cachedContour); });
     window.addEventListener('resize', function () { paint(cachedContour); });
+    persistReady = true;
   }
 
   // --------------------------------------------------------------- exports
@@ -2313,14 +2732,40 @@
     }, 30);
   }
 
+  // Traced rings are dense closed polylines. The SVG gets them as smooth
+  // cubic Béziers through the same points (the same rule the Font tool's
+  // export uses): each point's tangent runs parallel to its neighbours'
+  // chord, and each segment's handles reach a third of its length along the
+  // tangents at its ends. Curves stay smooth when scaled up in an editor
+  // instead of showing every facet of the trace.
+  function fmtN(v) { return String(Math.round(v * 100) / 100); }
+  function ringToCubicD(r) {
+    var n = r.length;
+    // a repeated closing point would make a zero-length segment
+    if (n > 3 && Math.abs(r[0][0] - r[n - 1][0]) < 1e-6 && Math.abs(r[0][1] - r[n - 1][1]) < 1e-6) n--;
+    if (n < 3) {
+      var dl = '';
+      for (var k = 0; k < n; k++) dl += (k ? 'L' : 'M') + fmtN(r[k][0]) + ',' + fmtN(r[k][1]);
+      return dl ? dl + 'Z' : '';
+    }
+    var tx = new Array(n), ty = new Array(n), i;
+    for (i = 0; i < n; i++) {
+      var a = r[(i - 1 + n) % n], b = r[(i + 1) % n];
+      var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+      tx[i] = len > 1e-9 ? dx / len : 0; ty[i] = len > 1e-9 ? dy / len : 0;
+    }
+    var d = 'M' + fmtN(r[0][0]) + ',' + fmtN(r[0][1]);
+    for (i = 0; i < n; i++) {
+      var j = (i + 1) % n, p = r[i], q = r[j];
+      var L3 = Math.hypot(q[0] - p[0], q[1] - p[1]) / 3;
+      d += 'C' + fmtN(p[0] + tx[i] * L3) + ',' + fmtN(p[1] + ty[i] * L3) +
+        ' ' + fmtN(q[0] - tx[j] * L3) + ',' + fmtN(q[1] - ty[j] * L3) +
+        ' ' + fmtN(q[0]) + ',' + fmtN(q[1]);
+    }
+    return d + 'Z';
+  }
   function ringsToPathD(rings) {
-    var d = '';
-    rings.forEach(function (r) {
-      d += 'M' + r[0][0].toFixed(2) + ',' + r[0][1].toFixed(2);
-      for (var i = 1; i < r.length; i++) d += 'L' + r[i][0].toFixed(2) + ',' + r[i][1].toFixed(2);
-      d += 'Z';
-    });
-    return d;
+    return rings.map(ringToCubicD).join('');
   }
 
   // Which characters each family actually has to render, so the export can ask

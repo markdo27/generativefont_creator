@@ -9,7 +9,7 @@
 <!-- Weights here must match the per-family weights in poster-engine.js
      (MONO_FONTS), otherwise the canvas preview synthesises a weight the SVG
      export does not embed. -->
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&family=IBM+Plex+Mono:wght@600&family=Space+Mono:wght@700&family=Roboto+Mono:wght@600&family=Fira+Code:wght@600&family=Courier+Prime:wght@700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&family=IBM+Plex+Mono:wght@400;600;700&family=Space+Mono:wght@700&family=Roboto+Mono:wght@600&family=Fira+Code:wght@600&family=Courier+Prime:wght@700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="poster.css">
 </head>
@@ -212,8 +212,16 @@
             <canvas id="overlayCanvas" aria-hidden="true"></canvas>
           </div>
         </div>
-        <div class="stage-loading" id="stageLoading" aria-hidden="true">Rendering&hellip;</div>
-        <div class="stage-hint" id="stageHint">Drag to move &middot; corners resize &middot; top handle rotates &middot; drag empty space to pan &middot; &#8984;/Ctrl + scroll to zoom</div>
+        <!-- In flow under the stage, so it can never sit on top of the poster. -->
+        <div class="stage-foot">
+          <p class="stage-hint" id="stageHint">
+            <span>Drag to move</span> <span>&middot; corners resize</span> <span>&middot; top handle rotates (<kbd>Shift</kbd> snaps 15&deg;)</span>
+            <span>&middot; <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&rarr;</kbd><kbd>&darr;</kbd> nudge (<kbd>Shift</kbd> = bigger steps)</span>
+            <span>&middot; <kbd>[</kbd> <kbd>]</kbd> rotate 1&deg; (<kbd>Shift</kbd> 15&deg;)</span>
+            <span>&middot; drag empty space to pan</span> <span>&middot; <kbd>&#8984;</kbd>/<kbd>Ctrl</kbd> + scroll to zoom</span>
+          </p>
+          <div class="stage-loading" id="stageLoading" aria-hidden="true">Rendering&hellip;</div>
+        </div>
       </section>
     </main>
 

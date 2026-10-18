@@ -32,7 +32,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 
 .pgroup { display: flex; flex-direction: column; gap: 9px; }
 .pgroup-title {
-  font-family: var(--mono); font-size: 9.5px; font-weight: 400; letter-spacing: 0.14em;
+  font-family: var(--mono); font-size: var(--fs-xs); font-weight: 400; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--muted); margin: 0;
   border-top: 1px solid var(--line-soft); padding-top: 12px;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -40,12 +40,12 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .phint { margin: 0; }
 .phint a { color: var(--muted); text-decoration: underline; }
 .phint a:hover { color: var(--accent); }
-.pgroup-title .mini-btn { padding: 3px 8px; font-size: 9px; }
+.pgroup-title .mini-btn { padding: 3px 8px; font-size: var(--fs-xs); }
 .pgroup:first-child .pgroup-title { border-top: none; padding-top: 0; }
 
 .pfield { display: flex; flex-direction: column; gap: 5px; }
 .pfield label, .pfield-label {
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between;
 }
 .pfield label b, .pfield-label b { color: var(--fg); font-weight: 600; }
@@ -55,7 +55,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   background: var(--surface); border: 1px solid var(--line); border-radius: 2px;
   padding: 8px 9px; width: 100%; resize: vertical;
 }
-.ptextarea { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; min-height: 48px; }
+.ptextarea { font-family: var(--mono); font-size: var(--fs-s); line-height: 1.5; min-height: 48px; }
 .ptext:focus, .ptextarea:focus, .pselect:focus, .pnum:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 .pselect { cursor: pointer; }
 .pselect.compact, .ptext.compact { padding: 6px 7px; font-size: 12px; }
@@ -71,13 +71,13 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .pgrid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 
 .seg-row { display: flex; gap: 6px; flex-wrap: wrap; }
-.seg-row .pill-btn { flex: 1; min-width: 0; padding: 8px 4px; font-size: 9.5px; }
+.seg-row .pill-btn { flex: 1; min-width: 0; padding: 8px 4px; font-size: var(--fs-xs); }
 
 .dropzone {
   display: block; position: relative;
   border: 1px dashed var(--line); border-radius: 3px; background: var(--surface);
   padding: 14px 10px; text-align: center; cursor: pointer;
-  font-family: var(--mono); font-size: 10.5px; color: var(--muted); line-height: 1.5;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); line-height: 1.5;
 }
 .dropzone:hover { border-color: var(--accent); color: var(--fg); }
 .dropzone.has-font { border-style: solid; border-color: var(--accent); color: var(--fg); }
@@ -96,7 +96,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .project-box .check-row.is-disabled { opacity: 0.45; cursor: default; }
 
 .phint {
-  font-family: var(--mono); font-size: 9.5px; line-height: 1.5; color: var(--muted);
+  font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.5; color: var(--muted);
 }
 
 /* ------------------------------------------------------------- item cards */
@@ -117,19 +117,19 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 
 .item-card-head {
   display: flex; align-items: center; gap: 7px;
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--muted);
 }
 .item-card.selected .item-card-head { color: var(--accent); }
 .item-card-head .spacer { flex: 1; }
 .item-card-head .meta {
-  font-size: 8.5px; letter-spacing: 0.06em; color: var(--muted); text-transform: none;
+  font-size: var(--fs-xs); letter-spacing: 0.06em; color: var(--muted); text-transform: none;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .item-card.selected .item-card-head .meta { color: var(--muted); }
 .icon-btn {
   border: 1px solid var(--line); background: var(--panel); color: var(--muted);
-  font-family: var(--mono); font-size: 11px; line-height: 1;
+  font-family: var(--mono); font-size: var(--fs-s); line-height: 1;
   width: 20px; height: 20px; border-radius: 2px; cursor: pointer; padding: 0;
 }
 .icon-btn:hover { color: var(--fg); border-color: #444; }
@@ -139,12 +139,12 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 
 .mini-slider { display: flex; align-items: center; gap: 7px; }
 .mini-slider > span {
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--muted); width: 30px; flex: 0 0 30px;
 }
 .mini-slider input[type=range] { flex: 1; min-width: 0; }
 .mini-slider b {
-  font-family: var(--mono); font-size: 9.5px; color: var(--fg); font-weight: 600;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--fg); font-weight: 600;
   width: 46px; flex: 0 0 46px; text-align: right;
 }
 
@@ -170,7 +170,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .pair-chip { height: 30px; display: flex; align-items: center; justify-content: center; }
 .pair-chip span { font-family: var(--mono); font-size: 13px; font-weight: 700; line-height: 1; }
 .pair-name {
-  font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted); padding: 4px 2px; background: var(--surface); text-align: center;
 }
 .pair-btn.active .pair-name { color: var(--fg); }
@@ -185,7 +185,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 
 .swatch-pick {
   display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--muted);
 }
 .swatch-pick:hover { color: var(--fg); }
@@ -198,7 +198,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 
 .check-row {
   display: flex; align-items: center; gap: 6px; cursor: pointer;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--muted); user-select: none; white-space: nowrap;
 }
 .check-row input { accent-color: var(--accent); width: 12px; height: 12px; cursor: pointer; }
@@ -213,7 +213,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   border-bottom: 1px solid var(--line); background: var(--surface);
 }
 .stage-meta {
-  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
   letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
 }
 .stage-spacer { flex: 1; }
@@ -221,7 +221,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .zoom-cluster input[type=range] { width: 108px; }
 .zoom-cluster .mini-btn { padding: 4px 8px; min-width: 26px; }
 .zoom-val {
-  font-family: var(--mono); font-size: 10px; color: var(--fg); font-weight: 600;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--fg); font-weight: 600;
   width: 40px; text-align: right;
 }
 
@@ -246,18 +246,31 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .canvas-holder #overlayCanvas.resizing { cursor: nwse-resize; }
 .canvas-holder #overlayCanvas.rotating { cursor: crosshair; }
 
+/* Hint strip under the stage: part of the column's flow (the scroll area
+   shrinks to make room), so the poster is never drawn underneath it. Phrases
+   wrap as whole units, never mid-phrase. */
+.stage-foot {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 7px 16px 8px; min-height: 30px;
+  border-top: 1px solid var(--line); background: var(--surface);
+}
 .stage-loading {
-  position: absolute; bottom: 34px; right: 18px;
-  font-family: var(--mono); font-size: 10px; color: var(--accent);
+  flex: 0 0 auto; margin-left: auto;
+  font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; color: var(--accent);
   letter-spacing: 0.08em; text-transform: uppercase; opacity: 0; transition: opacity 0.15s;
-  pointer-events: none;
+  pointer-events: none; white-space: nowrap;
 }
 .stage-loading.show { opacity: 1; }
 .stage-hint {
-  position: absolute; bottom: 10px; left: 18px; right: 120px;
-  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
-  letter-spacing: 0.06em; pointer-events: none;
-  text-shadow: 0 0 4px #050505, 0 0 2px #050505;   /* stays legible over the checkerboard */
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.stage-hint > span { white-space: nowrap; }
+.stage-hint kbd {
+  font-family: var(--mono); font-size: inherit; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 2px; padding: 0 3px; margin: 0 1px;
+  background: var(--panel);
 }
 
 .export-scale-select { min-width: 64px; }
@@ -281,11 +294,13 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   .control-bar { position: sticky; bottom: 0; z-index: 5; padding: 10px 16px; }
 }
 @media (max-width: 600px) {
+  /* touch screens: no keyboard to describe; the strip only flags renders */
   .stage-meta, .stage-hint { display: none; }
+  .stage-foot { min-height: 0; padding: 4px 12px; }
   .zoom-cluster input[type=range] { width: 80px; }
 }
 
 .field-label {
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
