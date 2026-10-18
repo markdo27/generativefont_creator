@@ -67,6 +67,24 @@
           <button class="mini-btn" id="btnAutoMetrics" type="button" title="Drop this glyph's manual spacing and go back to the automatic value">Auto</button>
         </div>
 
+        <div class="node-inspector metrics-row pair-row" role="group" aria-label="Kerning pair">
+          <div class="node-field pair-glyph">
+            <label for="pairLeft">Pair</label>
+            <input type="text" id="pairLeft" maxlength="2" value="A" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="node-field pair-glyph">
+            <label for="pairRight" class="visually-hidden">Second glyph</label>
+            <span class="pair-spacer" aria-hidden="true">&nbsp;</span>
+            <input type="text" id="pairRight" maxlength="2" value="V" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="node-field">
+            <label for="pairKern">Kern</label>
+            <input type="number" id="pairKern" step="0.5" title="Kerning for this pair, glyph units (negative = tighter)" />
+          </div>
+          <button class="mini-btn" id="btnPairAuto" type="button" title="Drop the manual value and use automatic kerning for this pair">Auto</button>
+        </div>
+        <div class="pair-preview" id="pairPreview" aria-hidden="true"></div>
+
         <div class="toggle-grid">
           <button class="pill-btn" id="btnResetGlyph" type="button" title="Revert this glyph (or the selected mark) to its original nodes">Reset</button>
           <button class="pill-btn" id="btnUndo" type="button" title="Undo (Ctrl/⌘ Z)">Undo</button>

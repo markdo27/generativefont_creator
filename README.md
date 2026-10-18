@@ -158,31 +158,46 @@ orange box and is listed in a toast instead of vanishing.
 
 Metrics are measured from the ink, not the skeleton frame: baseline = the
 median foot of H I E L N…, cap height = their median top, and the em is set so
-caps are 70 % of it. Preview sizes, the OTF (UPM 1000, caps ≈ 700, ascender
-1020 for stacked marks, descender −250) and the line-height control all share
-that em, so `Leading` behaves like CSS line-height on a real font.
+caps are 70 % of it; the ascender is the tallest stacked Vietnamese capital and
+the descender the lowest ink (dot below, comma, brackets). Preview sizes, the
+OTF (UPM 1000, caps ≈ 700) and the line-height control all share that em, so
+`Leading` behaves like CSS line-height on a real font.
 
 Sidebearings are optical: each glyph is scanned into left/right ink profiles
 and loses sidebearing in proportion to the white its own shape already holds
-(an O or A gets less than an H). Kerning compares the closest ink across a pair
-with what the two sidebearings alone would give and takes back a share of the
-excess (the *Kerning* slider), so AV, LT, TA, P. tuck in while HH stays put.
-Per-glyph `Left SB` / `Right SB` fields override the automatic values (stored
-as offsets, so they survive later shape changes). Kerning is applied in the
-previews and the specimen exports, and written into the OTF as a GPOS table.
+(an O or A gets less than an H). Kerning is only about how two shapes meet —
+how much white one side carries on its own is the sidebearings' job. It adds
+two interaction terms, scaled by the *Kerning* slider: *nesting* (how much
+farther apart the nearest inks are than the two sidebearings alone would put
+them: A|V, L|T, P|.) and *shared open white* (white both shapes leave open in
+the same rows, relative to H|H: the hole under T's arm, the bellies of O|O). A
+floor keeps the nearest ink — accents included — at least 0.4 × the H|H gap
+apart. HH, TH, NN stay at zero.
+Per-glyph `Left SB` / `Right SB` fields override the automatic sidebearings
+(stored as offsets, so they survive later shape changes), and the `Pair` row
+overrides any single pair's kerning (Vietnamese letters included) with a live
+preview. Kerning is applied in the previews and the specimen exports, and
+written into the OTF as a GPOS table.
 
 ## Projects
 
 Work autosaves to the browser (`localStorage`, key `liquidfont.project.v1`)
 and can be saved to / opened from a `.liquid.json` file with `Save` / `Open`.
+Opened files are validated into a staging copy (every value clamped to its
+slider's range) and only applied if the whole file passes. Undo covers node
+edits, sidebearings, kerning pairs, shape/spacing/accent settings, presets and
+preview blocks.
 The saved project includes every skeleton with your edits applied, which the
 Poster tool reads so posters use your glyphs.
 
 ## Export
 
-- **OTF** — every letter, numeral, punctuation mark and Vietnamese capital;
-  lowercase and Vietnamese lowercase code points map to the caps, NBSP to the
-  space, zero-width combining marks for decomposed text, a drawn `.notdef`,
-  AGL glyph names, measured vertical metrics, GPOS kerning.
+- **OTF** — every letter, numeral, punctuation mark and Vietnamese capital as
+  cubic outlines; lowercase and Vietnamese lowercase code points map to the
+  caps, NBSP to the space, zero-width combining marks for decomposed text, a
+  drawn `.notdef`, AGL glyph names, measured vertical metrics (hhea = typo,
+  OS/2 v4 with USE_TYPO_METRICS, Vietnamese code page), real `hmtx` left
+  sidebearings, an ASCII-safe PostScript name (the Unicode family name is
+  kept), GPOS kerning.
 - **SVG / PNG** — the whole specimen (every preview block with its own size,
   leading, tracking and ink/paper colours).

@@ -261,8 +261,10 @@
   // H|H gap apart, which can also loosen a pair that crowds.
   var KBASE = null, KOVER = 0;
   function kernOf(a, b) {
-    if (!(state.kern > 0) || !a || !b) return 0;
+    if (!a || !b) return 0;
     var key = a + '\u0000' + b;
+    if (state.kernOv[key] != null) return state.kernOv[key];   // a designer's own value wins
+    if (!(state.kern > 0)) return 0;
     if (key in KERN) return KERN[key];
     if (KBASE == null) {
       var h = spacingOf('H');
@@ -313,7 +315,7 @@
     seed: 5, preset: 'liquid', presetEdited: false,
     fontName: 'Ooze', ink: PALETTE[0],
     selected: 'A', activeNode: -1, globalEdit: false, mirror: false,
-    spacing: 7, kern: 0.7, metrics: {},
+    spacing: 7, kern: 0.7, metrics: {}, kernOv: {},
     draft: false,
     blocks: defaultBlocks(),
   }, PRESETS.liquid);
@@ -832,6 +834,7 @@
     updateUndo();
     updateNodeInspector();
     updateMetricFields();
+    updatePair();
   }
 
   function describeNode(n) {
@@ -970,14 +973,14 @@
     var sh = {};
     SHAPE_KEYS.forEach(function (k) { sh[k] = state[k]; });
     var L = GC.LAYOUT;
-    return JSON.stringify({ g: globalOv, l: letterOv, f: FLAT, m: state.metrics, x: globalExempt,
+    return JSON.stringify({ g: globalOv, l: letterOv, f: FLAT, m: state.metrics, x: globalExempt, k: state.kernOv,
       sh: sh, preset: state.preset, pe: state.presetEdited, seed: state.seed, sp: state.spacing, kern: state.kern,
       lay: { scale: L.scale, gapTop: L.gapTop, gapStack: L.gapStack, gapBottom: L.gapBottom },
       blocks: blocksData() });
   }
   function restore(s) {
     var o = JSON.parse(s);
-    globalOv = o.g; letterOv = o.l; FLAT = o.f; state.metrics = o.m || {}; globalExempt = o.x || {};
+    globalOv = o.g; letterOv = o.l; FLAT = o.f; state.metrics = o.m || {}; globalExempt = o.x || {}; state.kernOv = o.k || {};
     Object.keys(FLAT).forEach(function (k) { MIRROR[k] = computeMirrorMap(k); });
     if (o.sh) {
       SHAPE_KEYS.forEach(function (k) { state[k] = o.sh[k]; });
@@ -1155,6 +1158,47 @@
     schedule(); markDirty();
   }
   [lsbEl, rsbEl].forEach(function (el) { el.addEventListener('change', applyMetric); });
+  // per-pair kerning: type two glyphs, see the automatic value, override it.
+  // Overrides are absolute (glyph units) and go into previews, specimen and
+  // the OTF's GPOS table.
+  var pairL = $('pairLeft'), pairR = $('pairRight'), pairK = $('pairKern'), pairPv = $('pairPreview');
+  function pairKeys() {
+    var a = GC.clusters(pairL.value.trim())[0], b = GC.clusters(pairR.value.trim())[0];
+    return a && b && canDraw(a) && canDraw(b) ? [a, b] : null;
+  }
+  function updatePair() {
+    var ab = pairKeys();
+    pairK.disabled = !ab;
+    pairPv.innerHTML = '';
+    if (!ab) { pairK.value = ''; return; }
+    var key = ab[0] + '\u0000' + ab[1], v = kernOf(ab[0], ab[1]), manual = state.kernOv[key] != null;
+    if (document.activeElement !== pairK) pairK.value = v.toFixed(1);
+    pairK.classList.toggle('manual', manual);
+    $('btnPairAuto').disabled = !manual;
+    var size = 52, s0 = glyphSvg(ab[0], size, 'cell'), s1 = glyphSvg(ab[1], size, 'cell');
+    s1.style.marginLeft = (v * size / MET.em).toFixed(2) + 'px';
+    pairPv.classList.toggle('manual', manual);
+    pairPv.appendChild(s0); pairPv.appendChild(s1);
+  }
+  [pairL, pairR].forEach(function (el) {
+    el.addEventListener('input', function () { updatePair(); });
+    el.addEventListener('focus', function () { el.select(); });
+  });
+  pairK.addEventListener('change', function () {
+    var ab = pairKeys(), v = parseFloat(pairK.value);
+    if (!ab || !isFinite(v)) { updatePair(); return; }
+    pushUndo();
+    state.kernOv[ab[0] + '\u0000' + ab[1]] = Math.max(-60, Math.min(30, v));
+    KERN = {}; schedule(); markDirty();
+  });
+  $('btnPairAuto').addEventListener('click', function () {
+    var ab = pairKeys();
+    if (!ab) return;
+    pushUndo();
+    delete state.kernOv[ab[0] + '\u0000' + ab[1]];
+    KERN = {}; schedule(); markDirty(); toast('Back to automatic kerning for ' + ab.join(''));
+  });
+
   $('btnAutoMetrics').addEventListener('click', function () {
     if (!state.metrics[state.selected]) return;
     pushUndo(); delete state.metrics[state.selected];
@@ -1412,7 +1456,7 @@
       app: 'liquid.font', version: 1, savedAt: new Date().toISOString(),
       fontName: state.fontName, ink: state.ink, preset: state.preset, presetEdited: state.presetEdited,
       seed: state.seed, shape: shape,
-      spacing: { spacing: state.spacing, kern: state.kern, metrics: state.metrics },
+      spacing: { spacing: state.spacing, kern: state.kern, metrics: state.metrics, pairs: state.kernOv },
       marks: { scale: GC.LAYOUT.scale, gapTop: GC.LAYOUT.gapTop, gapStack: GC.LAYOUT.gapStack, gapBottom: GC.LAYOUT.gapBottom },
       globalOv: globalOv, letterOv: letterOv, globalExempt: globalExempt, flat: FLAT,
       blocks: state.blocks.map(function (b) { return { text: b.text, size: b.size, lh: b.lh, tr: b.tr, paper: b.paper }; }),
@@ -1474,6 +1518,12 @@
         if (Array.isArray(m) && isFinite(m[0]) && isFinite(m[1])) q.metrics[k] = [num(m[0], -60, 60, 0), num(m[1], -60, 60, 0)];
       }
     });
+    q.kernOv = {};
+    var hasK = function (x) { return !!BASE[x]; };
+    if (spc.pairs && typeof spc.pairs === 'object') Object.keys(spc.pairs).slice(0, 5000).forEach(function (k) {
+      var ab = k.split('\u0000'), v = +spc.pairs[k];
+      if (ab.length === 2 && isFinite(v) && ab.every(function (g) { return GC.plan(g, hasK); })) q.kernOv[k] = num(v, -60, 30, 0);
+    });
     var mk = p.marks || {};
     q.marks = { scale: num(mk.scale, 0.6, 1.5, 1), gapTop: num(mk.gapTop, 0, 20, 6), gapStack: num(mk.gapStack, 0, 20, 3), gapBottom: num(mk.gapBottom, 0, 20, 6) };
     q.flat = {};
@@ -1497,7 +1547,7 @@
     state.fontName = q.fontName; state.ink = q.ink; state.preset = q.preset; state.presetEdited = q.presetEdited;
     state.seed = q.seed;
     SHAPE_KEYS.forEach(function (k) { state[k] = q.shape[k]; });
-    state.spacing = q.spacing; state.kern = q.kern; state.metrics = q.metrics;
+    state.spacing = q.spacing; state.kern = q.kern; state.metrics = q.metrics; state.kernOv = q.kernOv;
     for (var k in q.marks) GC.LAYOUT[k] = q.marks[k];
     FLAT = q.flat;
     Object.keys(FLAT).forEach(function (x) { MIRROR[x] = computeMirrorMap(x); });
@@ -1727,6 +1777,7 @@
     keys.forEach(function (a) {
       keys.forEach(function (b) {
         var v = Math.round(kernOf(a, b) * SC);
+        if (state.kernOv[a + '\u0000' + b] != null && v) { pairs.push([index[a], index[b], v]); return; }
         if (Math.abs(v) >= 8) pairs.push([index[a], index[b], v]);   // under 0.8% em is invisible
       });
     });

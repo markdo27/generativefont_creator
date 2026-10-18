@@ -118,6 +118,12 @@ html, body {
 }
 .node-field { display: flex; flex-direction: column; gap: 4px; width: 62px; }
 .metrics-row .node-field { width: 76px; }
+.pair-row .pair-glyph { width: 40px; }
+.pair-row .pair-glyph input { text-align: center; font-size: var(--fs-m); }
+.pair-spacer { font-size: var(--fs-xs); line-height: 1; }
+.pair-preview { height: 46px; margin-top: -6px; color: var(--fg); display: flex; align-items: flex-end; justify-content: center; }
+.pair-preview svg { display: block; overflow: visible; }
+.pair-preview .manual { color: var(--accent); }
 .node-field label {
   font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--muted);
