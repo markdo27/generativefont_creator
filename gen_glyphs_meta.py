@@ -311,12 +311,14 @@ _os = (63 * 0.565, 63 * 0.825)          # along the diagonal, ~12u past the O's 
 G['\u00D8'] = [sloop(46, OCY, 33, ORY, 16.5, 15),
                detached([[R(46 - _os[0]), R(50.5 + _os[1]), 11], [R(46 + _os[0]), R(50.5 - _os[1]), 11]])]
 # AE: A's left leg, E's stem and arms, ~1.4 caps wide. The leg meets the top
-# arm well left of the stem (a flat apex like A's split one) and one bar runs
-# through both halves a little below centre, so the counter between leg and
-# stem is a trapezoid, not a sliver, and survives molten.
-G['\u00C6'] = [[[0, 94, 20], [17, 50, 10.5], [34, flat_top(15), 15], [66, 6, 17.5], [101, 8, 15]],
-               [[66, 6, 17.5], [65, 50, 13.5], [66, 94, 20], [103, flat_bot(15.5), 15.5]],
-               [[12, 62, 10.5], [65, 62, 12], [95, 62, 13]]]
+# arm well left of the stem (a flat apex like A's split one), the strokes
+# round the counter run a little lean, and the A bar sits low (as in A) while
+# the E keeps its own bar: run through at one height, the bar either shut
+# the A's counter or crowded the E's lower arm in molten.
+G['\u00C6'] = [[[0, 94, 20], [16, 50, 10], [32, flat_top(14.5), 14.5], [66, 6, 17], [101, 8, 15]],
+               [[66, 6, 17], [65, 50, 13], [66, 94, 20], [103, flat_bot(15.5), 15.5]],
+               [[67, 52, 13], [97, 52, 13]],
+               [[10, 72, 10.5], [66, 72, 11]]]
 # OE: a half O closed by the E's stem; one counter.
 _oe = sell(42, OCY, 36, ORY, [-90, -135, -180, -225, -270], 16.5, 15, 2.3)
 G['\u0152'] = [[[104, 8, 15], [66, 6, 18]] + _oe + [[66, 94, 20], [106, flat_bot(15.5), 15.5]],
@@ -337,17 +339,8 @@ _gq = [[38, 29, 10], [16, 53, 11.5], [38, 77, 10]]
 G['\u00AB'] = [_gq, detached([[n[0] + 36] + n[1:] for n in _gq])]
 G['\u00BB'] = mirror(G['\u00AB'])
 G['\u2022'] = [[[46, 52, 22]]]                                    # bullet: a fat period, raised
-# multiply: two crossing bars, hard-unioned so so small a cross doesn't web up
+# multiply: two crossing bars, hard-unioned so the small cross doesn't web up
 G['\u00D7'] = [[[26, 32, 13.5], [66, 72, 13.5]], detached([[66, 32, 13.5], [26, 72, 13.5]])]
-
-
-def shrink(chains, k, kr, cx=46, cy=50.5, dx=0, dy=0):
-    """Scale chains about (cx, cy) by k (radii by kr: small strokes would
-    vanish at k), then shift by (dx, dy)."""
-    return [[[R(cx + dx + (n[0] - cx) * k), R(cy + dy + (n[1] - cy) * k), R(n[2] * kr)] + n[3:] for n in c]
-            for c in chains]
-
-
 # registered: a small R inside a squarish ring (like ©'s, squared off to give
 # the R's corners room). The R's bowl is a closed squarish loop in a group of
 # its own, so no melt reaches so small a counter; stem and leg hang off it.
@@ -396,13 +389,14 @@ M['\u0308'] = [[[-15, 0, 11]], detached([[15, 0, 11]])]                        #
 M['\u0307'] = [[[0, 0, 11.5]]]                                                 # dot above
 M['\u030A'] = [loop(0, 0, 14, 13, 7.5, 7, 8)]            # ring above: one smooth closed piece, so the
                                                       # melt can't fill it; the hole is ring - stroke
-M['\u030C'] = [[[-17, -11, 9.5], [0, 3, 10.5], [17, -11, 9.5]]]                # caron = circumflex turned
+M['\u030C'] = [[[-17, -12, 9], [0, 3, 9.5], [17, -12, 9]]]     # caron: the circumflex turned, lighter and
+                                                      # a hair deeper, so its V stays a sharp V in molten
 M['\u0304'] = [[[-14, 0, 10], [14, 0, 10]]]                                    # macron
 # cedilla and ogonek hang off the foot: compose() puts their ink top 3u into
 # the base's bottom, the cedilla centred, the ogonek at the right foot. The
 # first node is the attach stub; the hook stays open so it never blobs.
-M['\u0327'] = [[[0, -1, 9.5], [1, 6, 8.5], [5, 9, 8], [10.5, 12.5, 8], [12, 18, 8], [8.5, 23.5, 8],
-                [1, 26, 8], [-7, 24.5, 8.5]]]                                  # cedilla
+M['\u0327'] = [[[0, -1, 9.5], [1, 6, 8.5], [6, 9.5, 7.5], [12, 13, 7.5], [13.5, 19, 7.5], [10, 25, 7.5],
+                [2, 27.5, 7.5], [-7, 26, 8]]]                                  # cedilla
 M['\u0328'] = [[[0, -1, 9.5], [-4, 8, 9], [-6, 16, 8.5], [-3, 23, 8], [5, 26, 7.5], [13, 24, 7]]]  # ogonek
 MARK_KEYS = list(M.keys())
 G.update(M)
