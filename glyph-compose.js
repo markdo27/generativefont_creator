@@ -232,6 +232,8 @@
       });
       baseRings = api.trace(chains, p.base + p.fused.join(''));
     }
+    var baseKey = p.base + p.fused.join('');
+    var baseCount = baseRings.length;
     var bb = bbox(baseRings) || pb;
     var ax = (pb[0] + pb[2]) / 2;      // centred on the letter itself, not its horn
     var lines = api.lines ? api.lines() : null;
@@ -276,7 +278,9 @@
       bottom = bbox(placed)[3];
     });
 
-    return { rings: out, parts: parts };
+    // baseKey/baseCount let a renderer reuse the base outline (plain or
+    // fused) and only add the floating marks: out.slice(baseCount)
+    return { rings: out, parts: parts, baseKey: baseKey, baseRings: baseRings, baseCount: baseCount };
   }
 
   return {

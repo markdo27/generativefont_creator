@@ -662,10 +662,10 @@ select {
 // Metaball / SDF letterform engine.
 //
 // A glyph is a set of chains of NODES, each node carrying its own radius.
-// Consecutive nodes are joined by a tapered capsule (radius lerps along the
-// segment -> variable stroke thickness). All capsules are combined with a
-// polynomial smooth-minimum, which makes the mass pool and bulge where
-// strokes meet, exactly like a viscous liquid.
+// Each chain is drawn as a smooth spline through its nodes (radius splined
+// too -> variable stroke thickness), cut into short tapered capsules. The
+// strokes are combined with a polynomial smooth-minimum, which makes the mass
+// pool into the joints where strokes meet, exactly like a viscous liquid.
 //
 // The resulting scalar field is contoured with marching squares and then
 // Chaikin-smoothed, so every edge comes out round -- there are no straight
@@ -693,26 +693,6 @@ select {
   }
 
   // ------------------------------------------------------------------ sdf
-  // Tapered capsule: distance to the segment a-b whose radius lerps ra->rb.
-  function sdTaperedCapsule(px, py, ax, ay, ra, bx, by, rb) {
-    var bax = bx - ax, bay = by - ay;
-    var l2 = bax * bax + bay * bay;
-    var t = l2 > 1e-9 ? ((px - ax) * bax + (py - ay) * bay) / l2 : 0;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    var cx = ax + bax * t, cy = ay + bay * t;
-    var dx = px - cx, dy = py - cy;
-    return Math.sqrt(dx * dx + dy * dy) - (ra + (rb - ra) * t);
-  }
-
-  // Polynomial smooth minimum — the "melt". k=0 is a hard union.
-  function smin(a, b, k) {
-    if (k <= 1e-6) return a < b ? a : b;
-    var h = k - Math.abs(a - b);
-    if (h < 0) h = 0;
-    h /= k;
-    return (a < b ? a : b) - h * h * k * 0.25;
-  }
-
   // ------------------------------------------------------------ presets
   // The Flow states, shared by the Font tool and the Poster tool. Melt is
   // capped per point (see makeField), so counters stay open even when the
@@ -934,42 +914,23 @@ select {
     }
     var far = reach - tension;   // a point with no capsule in reach is outside
 
-    // Running state of one evaluation: the melted value d of the pieces
-    // folded so far with its (approximate) gradient, and the current piece's
-    // hard minimum pm with the offset vector to its nearest capsule.
-    var d, gx, gy, pm, pdx, pdy, plen;
-    // Fold the current piece into d. The smooth-min only fills where the two
-    // surfaces meet at an angle (weight 1 - cos of the angle between their
-    // gradients, capped at 1): a crease or a gap between strokes gets the
-    // full melt fillet, but where two strokes overlap face-to-face (the
-    // shared node of a corner, a bar end inside a stem) nothing inflates, so
-    // corners and junctions keep the flat cap/base line instead of bulging.
-    function fold() {
-      if (d >= 1e8) { d = pm; gx = plen > 1e-9 ? pdx / plen : 0; gy = plen > 1e-9 ? pdy / plen : 0; return; }
-      var diff = d - pm, ad = diff < 0 ? -diff : diff;
-      var bx = plen > 1e-9 ? pdx / plen : 0, by = plen > 1e-9 ? pdy / plen : 0;
-      if (ad >= k) {
-        if (pm < d) { d = pm; gx = bx; gy = by; }
-        return;
-      }
-      var h = (k - ad) / k;
-      var gl = Math.sqrt(gx * gx + gy * gy);
-      var cs = gl > 1e-9 ? (gx * bx + gy * by) / gl : 0;
-      var w = 1 - cs;
-      if (w > 1) w = 1;
-      if (pm < d) { gx = gx * h * 0.5 + bx * (1 - h * 0.5); gy = gy * h * 0.5 + by * (1 - h * 0.5); d = pm; }
-      else { gx = gx * (1 - h * 0.5) + bx * h * 0.5; gy = gy * (1 - h * 0.5) + by * h * 0.5; }
-      d -= h * h * k * 0.25 * w;
-    }
-
+    // The pieces are folded in with a smooth-min that only fills where two
+    // surfaces meet at an angle: its fillet is weighted by 1 - cos of the
+    // angle between their gradients (capped at 1). A crease or a gap between
+    // strokes gets the full melt, but where two strokes overlap face to face
+    // (the shared node of a corner, a bar end inside a stem) nothing
+    // inflates, so corners and junctions hold the flat cap and base lines.
+    // (Written out twice, inline, because this is the hot loop.)
     return function (px, py) {
       var gxi = Math.floor((px - gx0) / BUCKET), gyi = Math.floor((py - gy0) / BUCKET);
       if (gxi < 0 || gyi < 0 || gxi >= gw || gyi >= gh) return far;
       var cell = gyi * gw + gxi, s = counts[cell], e = counts[cell + 1];
       if (s === e) return far;
       var best = 1e9, dh = 1e9;
-      d = 1e9; gx = 0; gy = 0; pm = 1e9; pdx = 0; pdy = 0; plen = 0;
+      var d = 1e9, gx = 0, gy = 0;               // folded value + its gradient
+      var pm = 1e9, pdx = 0, pdy = 0, pl = 0;     // current piece: min + offset
       var curP = -1, curG = GR[idx[s]];
+      var ad, h, bx, by, gl, w;
       for (var q = s; q < e; q++) {
         var i = idx[q];
         var ax = AX[i], ay = AY[i];
@@ -977,23 +938,41 @@ select {
         if (t < 0) t = 0; else if (t > 1) t = 1;
         var dx = px - ax - BX[i] * t, dy = py - ay - BY[i] * t;
         var len = Math.sqrt(dx * dx + dy * dy);
-        var di = len - (RA[i] + DR[i] * t);
+        var di = len - (RA[i] + DR[i] * t);    // tapered-capsule distance
         if (PC[i] !== curP) {
           if (curP >= 0) {                       // fold the finished piece in
-            if (k > 0) fold();
-            else if (pm < d) d = pm;
+            ad = d > pm ? d - pm : pm - d;
+            if (ad >= k) { if (pm < d) { d = pm; gx = pdx; gy = pdy; gl = pl; } }
+            else {
+              h = (k - ad) / k;
+              gl = Math.sqrt(gx * gx + gy * gy);
+              w = gl > 1e-9 && pl > 1e-9 ? 1 - (gx * pdx + gy * pdy) / (gl * pl) : 1;
+              if (w > 1) w = 1;
+              bx = pl > 1e-9 ? pdx / pl : 0; by = pl > 1e-9 ? pdy / pl : 0;
+              gx = gl > 1e-9 ? gx / gl : 0; gy = gl > 1e-9 ? gy / gl : 0;
+              if (pm < d) { gx = gx * h * 0.5 + bx * (1 - h * 0.5); gy = gy * h * 0.5 + by * (1 - h * 0.5); d = pm; }
+              else { gx = gx * (1 - h * 0.5) + bx * h * 0.5; gy = gy * (1 - h * 0.5) + by * h * 0.5; }
+              d -= h * h * k * 0.25 * w;
+            }
           }
           if (GR[i] !== curG) {                  // finished group: cap + hard union
             if (d < dh - kq) d = dh - kq;
             if (d < best) best = d;
             d = 1e9; dh = 1e9; curG = GR[i];
           }
-          curP = PC[i]; pm = di; pdx = dx; pdy = dy; plen = len;
-        } else if (di < pm) { pm = di; pdx = dx; pdy = dy; plen = len; }
+          curP = PC[i]; pm = di; pdx = dx; pdy = dy; pl = len;
+        } else if (di < pm) { pm = di; pdx = dx; pdy = dy; pl = len; }
         if (di < dh) dh = di;
       }
-      if (k > 0) fold();
-      else if (pm < d) d = pm;
+      ad = d > pm ? d - pm : pm - d;
+      if (ad >= k) { if (pm < d) d = pm; }
+      else {
+        h = (k - ad) / k;
+        gl = Math.sqrt(gx * gx + gy * gy);
+        w = gl > 1e-9 && pl > 1e-9 ? 1 - (gx * pdx + gy * pdy) / (gl * pl) : 1;
+        if (w > 1) w = 1;
+        d = (pm < d ? pm : d) - h * h * k * 0.25 * w;
+      }
       if (d < dh - kq) d = dh - kq;
       if (d < best) best = d;
       if (wob > 0) {
@@ -1641,6 +1620,8 @@ select {
       });
       baseRings = api.trace(chains, p.base + p.fused.join(''));
     }
+    var baseKey = p.base + p.fused.join('');
+    var baseCount = baseRings.length;
     var bb = bbox(baseRings) || pb;
     var ax = (pb[0] + pb[2]) / 2;      // centred on the letter itself, not its horn
     var lines = api.lines ? api.lines() : null;
@@ -1685,7 +1666,9 @@ select {
       bottom = bbox(placed)[3];
     });
 
-    return { rings: out, parts: parts };
+    // baseKey/baseCount let a renderer reuse the base outline (plain or
+    // fused) and only add the floating marks: out.slice(baseCount)
+    return { rings: out, parts: parts, baseKey: baseKey, baseRings: baseRings, baseCount: baseCount };
   }
 
   return {
@@ -1914,7 +1897,7 @@ select {
 </script>
 
 <script>
-var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12.5], [11, 94, 20]], [[50, -2, 12], [64, 46, 12.5], [81, 94, 20]], [[19, 75, 11.5], [73, 75, 11.5]]], "B": [[[20, 6, 19], [19, 49, 13], [20, 94, 20]], [[20, 6, 19], [42, -0.9, 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12], [22, 48, 11.5]], [[22, 48, 11.5], [48, 49, 12], [69, 56, 13.5], [78, 73, 15.5], [70, 92, 14], [46, 101.4, 14], [20, 94, 20]]], "C": [[[73.6, 18.7, 15.5], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [73.6, 82.3, 15.5]]], "D": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [65, 8, 15], [77, 28, 16.5], [79, 50, 17], [77, 72, 16.5], [65, 92, 15], [44, 101.4, 14], [20, 94, 20]]], "E": [[[72, 8, 15], [22, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]], [[20, 50, 15], [60, 50, 15]]], "F": [[[20, 94, 20], [19, 50, 15], [22, 6, 19], [72, 8, 15]], [[20, 52, 15], [60, 52, 15]]], "G": [[[69.6, 11.6, 15.0], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [70.7, 87.8, 15.0], [79, 75, 15.5], [79, 58, 14.5], [56, 58, 13]]], "H": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[72, 6, 19], [73, 50, 14], [72, 94, 20]], [[20, 50, 15], [72, 50, 15]]], "I": [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]], "J": [[[64, 6, 19], [64, 40, 15], [63, 66, 15.5], [56, 88, 15.5], [38, 100.9, 15], [22, 95, 15], [12, 77, 16]]], "K": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[76, 4.0, 17], [22, 54, 13.5]], [[38, 45, 13.5], [78, 96.0, 18]]], "L": [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]]], "M": [[[10, 94, 20], [12, 4.0, 18], [46, 58, 13], [80, 4.0, 18], [82, 94, 20]]], "N": [[[20, 94, 20], [19, 50, 14], [19, 5.0, 18], [46, 50, 13], [73, 96.0, 18], [73, 50, 14], [73, 6, 19]]], "O": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]]], "P": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]]], "Q": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]], [[58, 80, 12], [86, 108, 15]]], "R": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]], [[40, 56, 13], [78, 96.0, 18]]], "S": [[[72.4, 20, 15], [61.8, 4.5, 14.5], [46.0, -0.4, 14.5], [28.4, 4, 14.5], [19.6, 20, 15], [24.9, 37, 14.5], [40.7, 47, 14], [54.8, 54, 14], [68.9, 64, 14.5], [73.3, 81, 15], [65.4, 96, 14.5], [46.9, 101.4, 14.5], [28.4, 98, 14.5], [17.0, 82, 15]]], "T": [[[13, 3.1, 16], [79, 3.1, 16]], [[46, 6, 17], [45, 50, 14], [46, 94, 20]]], "U": [[[19, 6, 19], [19, 40, 15], [19.0, 66.0, 15.5], [29.3, 93.1, 15.5], [46.0, 100.4, 15.5], [62.7, 93.1, 15.5], [73.0, 66.0, 15.5], [73, 40, 15], [73, 6, 19]]], "V": [[[11, 5.0, 18], [29, 50, 14], [46, 97.0, 19], [63, 50, 14], [81, 5.0, 18]]], "W": [[[6, 4.0, 17], [25, 97.0, 18], [46, 40, 13], [67, 97.0, 18], [86, 4.0, 17]]], "X": [[[13, 4.0, 17], [46, 50, 13.5], [79, 95.0, 19]], [[79, 4.0, 17], [46, 50, 13.5], [13, 95.0, 19]]], "Y": [[[13, 4.0, 17], [46, 52, 13.5], [79, 4.0, 17]], [[46, 52, 14], [46, 94, 20]]], "Z": [[[13, 4.0, 17], [77, 3.5, 16.5], [15, 96.9, 17], [80, 96.4, 17.5]]], "0": [[[46.0, -0.4, 14.5], [66.7, 12.8, 15.4], [74.0, 50.5, 16.0], [66.7, 88.2, 15.4], [46.0, 101.4, 14.5], [25.3, 88.2, 15.4], [18.0, 50.5, 16.0], [25.3, 12.8, 15.4], [46.0, -0.4, 14.5]]], "1": [[[26, 22, 14], [47, 4.0, 17], [46, 50, 15], [46, 94, 20]]], "2": [[[16, 24, 15], [26, 8, 15], [45, 0.1, 15], [64, 6, 15], [74, 22, 15.5], [69, 40, 14], [52, 58, 13.5], [19, 97.4, 16.5], [78, 97.9, 16]]], "3": [[[17, 16, 15], [30, 3, 14.5], [48, -0.4, 14.5], [66, 6, 14.5], [72, 22, 15], [62, 39, 13.5], [40, 46, 12.5], [62, 52, 14], [76, 68, 15.5], [74, 86, 15], [60, 98, 14.5], [40, 101.4, 14.5], [22, 97, 14.5], [11, 82, 15]]], "4": [[[67, 94.0, 20], [67, 48, 13], [67, 3.1, 16], [35, 38, 10.5], [2, 74, 12.5], [89, 74, 13.5]]], "5": [[[76, 2.6, 15.5], [27, 4.0, 17], [22, 42, 14], [44, 38, 13.5], [66, 46, 15], [77, 66, 16.5], [71, 88, 15.5], [52, 101.4, 14.5], [31, 99, 14.5], [14, 86, 15]]], "6": [[[72, 12, 15], [56, -0.4, 14.5], [37, 3, 15], [22, 18, 15.5], [15, 42, 16], [15, 64, 16], [22, 86, 15.5], [40, 101.4, 14.5], [60, 98, 14.5], [75, 84, 15.5], [77, 66, 15.5], [66, 51, 14], [46, 46, 13.5], [27, 52, 14], [16, 64, 15]]], "7": [[[12, 4.0, 17], [80, 4.0, 17], [56, 50, 14], [40, 96.0, 18]]], "8": [[[46.0, -1.4, 13.5], [60.3, 4.8, 13.8], [68.0, 24.3, 14.0], [60.3, 43.8, 13.8], [46.0, 50.0, 13.5], [31.7, 43.8, 13.8], [24.0, 24.3, 14.0], [31.7, 4.8, 13.8], [46.0, -1.4, 13.5]], [[46.0, 46.0, 14.5], [63.8, 53.5, 14.8], [72.0, 73.7, 15.0], [63.8, 93.9, 14.8], [46.0, 101.4, 14.5], [28.2, 93.9, 14.8], [20.0, 73.7, 15.0], [28.2, 53.5, 14.8], [46.0, 46.0, 14.5]]], "9": [[[20.0, 89.0, 15], [36.0, 101.4, 14.5], [55.0, 98.0, 15], [70.0, 83.0, 15.5], [77.0, 59.0, 16], [77.0, 37.0, 16], [70.0, 15.0, 15.5], [52.0, -0.4, 14.5], [32.0, 3.0, 14.5], [17.0, 17.0, 15.5], [15.0, 35.0, 15.5], [26.0, 50.0, 14], [46.0, 55.0, 13.5], [65.0, 49.0, 14], [76.0, 37.0, 15]]], ".": [[[46, 97, 17]]], ",": [[[47, 96, 17], [39, 120, 9]]], "!": [[[46, 6, 16], [45, 60, 12]], [[46, 97, 16, 1]]], "?": [[[16, 22, 14.5], [27, 5, 14.5], [46, -0.4, 14.5], [65, 5, 14.5], [74, 21, 15], [66, 38, 13.5], [50, 48, 12.5], [46, 62, 12]], [[46, 97, 16, 1]]], "'": [[[46, -2, 15], [41, 24, 10]]], "-": [[[32, 51, 14], [60, 51, 14]]], ":": [[[46, 45, 16]], [[46, 97, 17, 1]]], ";": [[[46, 45, 16]], [[47, 96, 17, 1], [39, 120, 9]]], "\"": [[[30, -2, 15], [26, 24, 10]], [[62, -2, 15, 1], [58, 24, 10]]], "(": [[[64, -12, 13], [44, 10, 14], [35, 50, 15.5], [44, 90, 14], [64, 112, 13]]], ")": [[[28.0, -12, 13], [48.0, 10, 14], [57.0, 50, 15.5], [48.0, 90, 14], [28.0, 112, 13]]], "/": [[[70, -4, 14], [22, 104, 14]]], "&": [[[85, 57, 14], [79, 78, 14], [64, 94, 14], [44, 101.9, 14], [23, 96, 14.5], [12, 80, 15], [17, 62, 14], [34, 48, 12.5], [52, 36, 13], [61, 21, 13.5], [57, 6, 13.5], [42, -1.4, 13.5], [28, 6, 13.5], [22, 21, 13.5], [28, 37, 12.5], [56, 68, 13], [84, 96.9, 17]]], "+": [[[46, 24, 15], [46, 80, 15]], [[18, 52, 15], [74, 52, 15]]], "=": [[[18, 36, 14], [74, 36, 14]], [[18, 68, 14, 1], [74, 68, 14]]], "*": [[[46.0, 3.0, 10.5], [46, 26, 9.5], [46.0, 49.0, 10.5]], [[65.9, 14.5, 10.5], [46, 26, 9.5], [26.1, 37.5, 10.5]], [[65.9, 37.5, 10.5], [46, 26, 9.5], [26.1, 14.5, 10.5]]], "#": [[[33, 2, 11.5], [21, 100, 11.5]], [[72, 2, 11.5], [60, 100, 11.5]], [[5, 28, 11.5], [92, 28, 11.5]], [[0, 74, 11.5], [87, 74, 11.5]]], "%": [[[22.0, 4.0, 10.0], [30.7, 7.9, 10.5], [37.0, 25.0, 11.0], [30.7, 42.1, 10.5], [22.0, 46.0, 10.0], [13.3, 42.1, 10.5], [7.0, 25.0, 11.0], [13.3, 7.9, 10.5], [22.0, 4.0, 10.0]], [[76, 0, 13], [16, 102, 13]], [[70.0, 56.0, 10.0], [78.7, 59.9, 10.5], [85.0, 77.0, 11.0], [78.7, 94.1, 10.5], [70.0, 98.0, 10.0], [61.3, 94.1, 10.5], [55.0, 77.0, 11.0], [61.3, 59.9, 10.5], [70.0, 56.0, 10.0]]], "@": [[[47.0, 35.5, 9.0], [56.4, 39.6, 9.2], [62.0, 54.0, 9.5], [56.4, 68.4, 9.2], [47.0, 72.5, 9.0], [37.6, 68.4, 9.2], [32.0, 54.0, 9.5], [37.6, 39.6, 9.2], [47.0, 35.5, 9.0]], [[64, 35, 10.5], [64, 63, 11], [68, 72, 11], [76, 75, 11], [85, 69, 11.5], [90, 53, 12], [88, 31, 12.5], [76, 11, 12.5], [56, 0, 12], [34, 1, 12.5], [14, 13, 12.5], [2, 36, 13], [1, 62, 13], [10, 86, 12.5], [28, 101, 12], [48, 105, 11.5], [64, 102, 11]]], "\u2013": [[[14, 51, 14], [78, 51, 14]]], "\u2014": [[[-14, 51, 14], [106, 51, 14]]], "\u2018": [[[45, 22, 16], [53, -4, 8]]], "\u2019": [[[47, 0, 16], [39, 26, 8]]], "\u201c": [[[29, 22, 16], [37, -4, 8]], [[63, 22, 16, 1], [71, -4, 8]]], "\u201d": [[[29, 0, 16], [21, 26, 8]], [[63, 0, 16, 1], [55, 26, 8]]], "\u0301": [[[-11, 4, 9.5], [11, -9, 11]]], "\u0300": [[[-11, -9, 11], [11, 4, 9.5]]], "\u0309": [[[-9, -18, 8.5], [-1, -24, 8.5], [9, -22, 8.5], [13, -14, 8.5], [8, -7, 8], [3, -3, 8], [2, 3, 9]]], "\u0303": [[[-18, -2, 9], [-11, -8.5, 9.5], [-4, -7, 9], [4, -3, 9], [11, -1.5, 9], [18, -8, 9.5]]], "\u0323": [[[0, 0, 15]]], "\u0302": [[[-17, 3, 9.5], [0, -11, 10.5], [17, 3, 9.5]]], "\u0306": [[[-16, -10, 9.5], [-9, 0, 9], [0, 2.5, 9], [9, 0, 9], [16, -10, 9.5]]], "\u031b": [[[0, 0, 12], [14, -3, 10.5], [24, -10, 11.5]]], "\u0335": [[[-28, 0, 11], [20, 0, 10.5]]]}};
+var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12.5], [11, 94, 20]], [[50, -2, 12], [64, 46, 12.5], [81, 94, 20]], [[19, 75, 11.5], [73, 75, 11.5]]], "B": [[[20, 6, 19], [19, 49, 13], [20, 94, 20]], [[20, 6, 19], [42, -0.9, 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12], [22, 48, 11.5]], [[22, 48, 11.5], [48, 49, 12], [69, 56, 13.5], [78, 73, 15.5], [70, 92, 14], [46, 101.4, 14], [20, 94, 20]]], "C": [[[73.6, 18.7, 15.5], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [73.6, 82.3, 15.5]]], "D": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [65, 8, 15], [77, 28, 16.5], [79, 50, 17], [77, 72, 16.5], [65, 92, 15], [44, 101.4, 14], [20, 94, 20]]], "E": [[[72, 8, 15], [22, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]], [[20, 50, 15], [60, 50, 15]]], "F": [[[20, 94, 20], [19, 50, 15], [22, 6, 19], [72, 8, 15]], [[20, 52, 15], [60, 52, 15]]], "G": [[[69.6, 11.6, 15.0], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [70.7, 87.8, 15.0], [79, 75, 15.5], [79, 58, 14.5], [56, 58, 13]]], "H": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[72, 6, 19], [73, 50, 14], [72, 94, 20]], [[20, 50, 15], [72, 50, 15]]], "I": [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]], "J": [[[64, 6, 19], [64, 40, 15], [63, 66, 15.5], [56, 88, 15.5], [38, 100.9, 15], [22, 95, 15], [12, 77, 16]]], "K": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[76, 4.0, 17], [22, 54, 13.5]], [[38, 45, 13.5], [78, 96.0, 18]]], "L": [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]]], "M": [[[10, 94, 20], [12, 4.0, 18], [46, 58, 13], [80, 4.0, 18], [82, 94, 20]]], "N": [[[19, 94, 20], [18, 50, 13.5], [18, 5.0, 18], [46, 50, 12], [74, 96.0, 18], [74, 50, 13.5], [74, 6, 19]]], "O": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]]], "P": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]]], "Q": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]], [[58, 80, 12], [86, 108, 15]]], "R": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]], [[40, 56, 13], [78, 96.0, 18]]], "S": [[[72.4, 20, 15], [61.8, 4.5, 14.5], [46.0, -0.4, 14.5], [28.4, 4, 14.5], [19.6, 20, 15], [24.9, 37, 14.5], [40.7, 47, 14], [54.8, 54, 14], [68.9, 64, 14.5], [73.3, 81, 15], [65.4, 96, 14.5], [46.9, 101.4, 14.5], [28.4, 98, 14.5], [17.0, 82, 15]]], "T": [[[13, 3.1, 16], [79, 3.1, 16]], [[46, 6, 17], [45, 50, 14], [46, 94, 20]]], "U": [[[19, 6, 19], [19, 40, 15], [19.0, 66.0, 15.5], [29.3, 93.1, 15.5], [46.0, 100.4, 15.5], [62.7, 93.1, 15.5], [73.0, 66.0, 15.5], [73, 40, 15], [73, 6, 19]]], "V": [[[11, 5.0, 18], [29, 50, 14], [46, 97.0, 19], [63, 50, 14], [81, 5.0, 18]]], "W": [[[0, 3.1, 16], [11, 50, 12], [22, 99.4, 15.5], [34, 66, 11], [46, 36, 11.5], [58, 66, 11], [70, 99.4, 15.5], [81, 50, 12], [92, 3.1, 16]]], "X": [[[13, 4.0, 17], [46, 50, 13.5], [79, 95.0, 19]], [[79, 4.0, 17], [46, 50, 13.5], [13, 95.0, 19]]], "Y": [[[13, 4.0, 17], [46, 52, 13.5], [79, 4.0, 17]], [[46, 52, 14], [46, 94, 20]]], "Z": [[[13, 4.0, 17], [77, 3.5, 16.5], [15, 96.9, 17], [80, 96.4, 17.5]]], "0": [[[46.0, -0.4, 14.5], [66.7, 12.8, 15.4], [74.0, 50.5, 16.0], [66.7, 88.2, 15.4], [46.0, 101.4, 14.5], [25.3, 88.2, 15.4], [18.0, 50.5, 16.0], [25.3, 12.8, 15.4], [46.0, -0.4, 14.5]]], "1": [[[26, 22, 14], [47, 4.0, 17], [46, 50, 15], [46, 94, 20]]], "2": [[[16, 24, 15], [26, 8, 15], [45, 0.1, 15], [64, 6, 15], [74, 22, 15.5], [69, 40, 14], [52, 58, 13.5], [19, 97.4, 16.5], [78, 97.9, 16]]], "3": [[[17, 16, 15], [30, 3, 14.5], [48, -0.4, 14.5], [66, 6, 14.5], [72, 22, 15], [62, 39, 13.5], [40, 46, 12.5], [62, 52, 14], [76, 68, 15.5], [74, 86, 15], [60, 98, 14.5], [40, 101.4, 14.5], [22, 97, 14.5], [11, 82, 15]]], "4": [[[67, 94.0, 20], [67, 48, 13], [67, 3.1, 16], [35, 38, 10.5], [2, 74, 12.5], [89, 74, 13.5]]], "5": [[[76, 2.6, 15.5], [27, 4.0, 17], [22, 42, 14], [44, 38, 13.5], [66, 46, 15], [77, 66, 16.5], [71, 88, 15.5], [52, 101.4, 14.5], [31, 99, 14.5], [14, 86, 15]]], "6": [[[72, 12, 15], [56, -0.4, 14.5], [37, 3, 15], [22, 18, 15.5], [15, 42, 16], [15, 64, 16], [22, 86, 15.5], [40, 101.4, 14.5], [60, 98, 14.5], [75, 84, 15.5], [77, 66, 15.5], [66, 51, 14], [46, 46, 13.5], [27, 52, 14], [16, 64, 15]]], "7": [[[12, 4.0, 17], [80, 4.0, 17], [56, 50, 14], [40, 96.0, 18]]], "8": [[[46.0, -1.4, 13.5], [60.3, 4.8, 13.8], [68.0, 24.3, 14.0], [60.3, 43.8, 13.8], [46.0, 50.0, 13.5], [31.7, 43.8, 13.8], [24.0, 24.3, 14.0], [31.7, 4.8, 13.8], [46.0, -1.4, 13.5]], [[46.0, 46.0, 14.5], [63.8, 53.5, 14.8], [72.0, 73.7, 15.0], [63.8, 93.9, 14.8], [46.0, 101.4, 14.5], [28.2, 93.9, 14.8], [20.0, 73.7, 15.0], [28.2, 53.5, 14.8], [46.0, 46.0, 14.5]]], "9": [[[20.0, 89.0, 15], [36.0, 101.4, 14.5], [55.0, 98.0, 15], [70.0, 83.0, 15.5], [77.0, 59.0, 16], [77.0, 37.0, 16], [70.0, 15.0, 15.5], [52.0, -0.4, 14.5], [32.0, 3.0, 14.5], [17.0, 17.0, 15.5], [15.0, 35.0, 15.5], [26.0, 50.0, 14], [46.0, 55.0, 13.5], [65.0, 49.0, 14], [76.0, 37.0, 15]]], ".": [[[46, 97, 17]]], ",": [[[47, 96, 17], [39, 120, 9]]], "!": [[[46, 6, 16], [45, 60, 12]], [[46, 97, 16, 1]]], "?": [[[16, 22, 14.5], [27, 5, 14.5], [46, -0.4, 14.5], [65, 5, 14.5], [74, 21, 15], [66, 38, 13.5], [50, 48, 12.5], [46, 62, 12]], [[46, 97, 16, 1]]], "'": [[[46, -2, 15], [41, 24, 10]]], "-": [[[32, 51, 14], [60, 51, 14]]], ":": [[[46, 45, 16]], [[46, 97, 17, 1]]], ";": [[[46, 45, 16]], [[47, 96, 17, 1], [39, 120, 9]]], "\"": [[[30, -2, 15], [26, 24, 10]], [[62, -2, 15, 1], [58, 24, 10]]], "(": [[[64, -12, 13], [44, 10, 14], [35, 50, 15.5], [44, 90, 14], [64, 112, 13]]], ")": [[[28.0, -12, 13], [48.0, 10, 14], [57.0, 50, 15.5], [48.0, 90, 14], [28.0, 112, 13]]], "/": [[[70, -4, 14], [22, 104, 14]]], "&": [[[85, 57, 14], [79, 78, 14], [64, 94, 14], [44, 101.9, 14], [23, 96, 14.5], [12, 80, 15], [17, 62, 14], [34, 48, 12.5], [52, 36, 13], [61, 21, 13.5], [57, 6, 13.5], [42, -1.4, 13.5], [28, 6, 13.5], [22, 21, 13.5], [28, 37, 12.5], [56, 68, 13], [84, 96.9, 17]]], "+": [[[46, 24, 15], [46, 80, 15]], [[18, 52, 15], [74, 52, 15]]], "=": [[[18, 36, 14], [74, 36, 14]], [[18, 68, 14, 1], [74, 68, 14]]], "*": [[[46.0, 3.0, 10.5], [46, 26, 9.5], [46.0, 49.0, 10.5]], [[65.9, 14.5, 10.5, 1], [46, 26, 9.5], [26.1, 37.5, 10.5]], [[65.9, 37.5, 10.5, 1], [46, 26, 9.5], [26.1, 14.5, 10.5]]], "#": [[[33, 2, 11.5], [21, 100, 11.5]], [[72, 2, 11.5], [60, 100, 11.5]], [[5, 28, 11.5], [92, 28, 11.5]], [[0, 74, 11.5], [87, 74, 11.5]]], "%": [[[22.0, 4.0, 10.0], [30.7, 7.9, 10.5], [37.0, 25.0, 11.0], [30.7, 42.1, 10.5], [22.0, 46.0, 10.0], [13.3, 42.1, 10.5], [7.0, 25.0, 11.0], [13.3, 7.9, 10.5], [22.0, 4.0, 10.0]], [[76, 0, 13], [16, 102, 13]], [[70.0, 56.0, 10.0], [78.7, 59.9, 10.5], [85.0, 77.0, 11.0], [78.7, 94.1, 10.5], [70.0, 98.0, 10.0], [61.3, 94.1, 10.5], [55.0, 77.0, 11.0], [61.3, 59.9, 10.5], [70.0, 56.0, 10.0]]], "@": [[[46.0, 36.5, 9.0], [55.4, 40.6, 9.2], [61.0, 55.0, 9.5], [55.4, 69.4, 9.2], [46.0, 73.5, 9.0], [36.6, 69.4, 9.2], [31.0, 55.0, 9.5], [36.6, 40.6, 9.2], [46.0, 36.5, 9.0]], [[63, 40, 10.5], [63, 64, 11], [67, 73, 11], [76, 77, 11], [87, 72, 11.5], [95, 55, 12], [94, 32, 12.5], [82, 11, 12.5], [60, -1, 12], [34, 0, 12.5], [11, 11, 12.5], [-3, 34, 13], [-4, 62, 13], [5, 87, 12.5], [25, 102, 12], [47, 106, 11.5], [65, 103, 11]]], "\u2013": [[[14, 51, 14], [78, 51, 14]]], "\u2014": [[[-14, 51, 14], [106, 51, 14]]], "\u2018": [[[45, 22, 16], [53, -4, 8]]], "\u2019": [[[47, 0, 16], [39, 26, 8]]], "\u201c": [[[29, 22, 16], [37, -4, 8]], [[63, 22, 16, 1], [71, -4, 8]]], "\u201d": [[[29, 0, 16], [21, 26, 8]], [[63, 0, 16, 1], [55, 26, 8]]], "\u0301": [[[-11, 4, 9.5], [11, -9, 11]]], "\u0300": [[[-11, -9, 11], [11, 4, 9.5]]], "\u0309": [[[-9, -18, 8.5], [-1, -24, 8.5], [9, -22, 8.5], [13, -14, 8.5], [8, -7, 8], [3, -3, 8], [2, 3, 9]]], "\u0303": [[[-18, -2, 9], [-11, -8.5, 9.5], [-4, -7, 9], [4, -3, 9], [11, -1.5, 9], [18, -8, 9.5]]], "\u0323": [[[0, 0, 15]]], "\u0302": [[[-17, 3, 9.5], [0, -11, 10.5], [17, 3, 9.5]]], "\u0306": [[[-16, -10, 9.5], [-9, 0, 9], [0, 2.5, 9], [9, 0, 9], [16, -10, 9.5]]], "\u031b": [[[0, 0, 12], [14, -3, 10.5], [24, -10, 11.5]]], "\u0335": [[[-28, 0, 11], [20, 0, 10.5]]]}};
 </script>
 
 <script>
@@ -2055,7 +2038,17 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12
     return c ? c.rings : [];
   }
   function canDraw(L) { return (FLAT[L] && !isMark(L)) || !!GC.plan(L, hasKey); }
+  // path strings are cached per traced ring set (rings are immutable once
+  // traced), so a spacing-only change rebuilds no geometry text at all
+  var dCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function ringsToD(rings) {
+    var hit = dCache && dCache.get(rings);
+    if (hit !== undefined) return hit;
+    var d = ringsToDRaw(rings);
+    if (dCache) dCache.set(rings, d);
+    return d;
+  }
+  function ringsToDRaw(rings) {
     var d = '';
     for (var i = 0; i < rings.length; i++) {
       var r = rings[i];
@@ -2198,7 +2191,6 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12
   // few-hundred-point outline. Composites met in preview text are added on
   // demand.
   var extraKeys = {};
-  function defKeys() { return LETTERS.concat(VIET, Object.keys(extraKeys)); }
   // a lone mark is shown where it would sit on a host letter
   function markHost(m) { return m === '̵' ? 'D' : 'O'; }
   function markPlacement(m) {
@@ -2211,46 +2203,61 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12
     var p = markPlacement(L);
     return GC.shift(ringsOf(L), p.ox, p.oy);
   }
+  // A composite's def reuses its base outline through <use> and only adds
+  // its marks, so 67 Vietnamese letters cost 67 small mark paths rather than
+  // 67 copies of A E I O U Y. Fused bases (Ơ Ư Đ) get one def each.
+  var fusedDefs = {};
+  function defMarkup(L) {
+    var c = !FLAT[L] && compositeOf(L);
+    if (!c) return '<path id="' + gid(L) + '" d="' + ringsToD(displayRings(L)) + '" fill-rule="nonzero"/>';
+    var pre = '';
+    if (c.baseKey !== c.parts[0].key && !fusedDefs[c.baseKey]) {
+      fusedDefs[c.baseKey] = 1;
+      pre = '<path id="' + gid(c.baseKey) + '" d="' + ringsToD(c.baseRings) + '" fill-rule="nonzero"/>';
+    }
+    return pre + '<g id="' + gid(L) + '"><use href="#' + gid(c.baseKey) + '"/><path d="' +
+      ringsToDRaw(c.rings.slice(c.baseCount)) + '" fill-rule="nonzero"/></g>';
+  }
   function refreshDefs() {
-    SPC = {}; KERN = {};
+    SPC = {}; KERN = {}; fusedDefs = {};
     measureMetrics();
     var out = '';
-    defKeys().concat(MARK_KEYS).forEach(function (L) {
-      out += '<path id="' + gid(L) + '" d="' + ringsToD(displayRings(L)) + '" fill-rule="nonzero"/>';
-    });
+    MARK_KEYS.concat(LETTERS, VIET, Object.keys(extraKeys)).forEach(function (L) { out += defMarkup(L); });
     defsInner.innerHTML = out;
   }
   function ensureDef(L) {
     if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0) return;
     extraKeys[L] = 1;
-    var p = document.createElementNS(NS, 'path');
-    p.setAttribute('id', gid(L));
-    p.setAttribute('d', ringsToD(ringsOf(L)));
-    defsInner.appendChild(p);
+    defsInner.insertAdjacentHTML('beforeend', defMarkup(L));
   }
 
   // mode 'text': the svg's margin box collapses onto the baseline, so the
   // line box comes from CSS line-height alone and glyphs overhang into the
   // leading exactly as a real font's do. mode 'cell': a full ascender-to-
   // descender frame, for grids where every cell must line up.
-  function glyphSvg(L, sizePx, mode) {
-    var em = MET.em, k = sizePx / em, svg = document.createElementNS(NS, 'svg');
-    var vx, vw, host = isMark(L) ? markHost(L) : null;
-    var s = spacingOf(host || L);
-    vx = s.x0 - s.lsb; vw = s.adv;
-    if (host) {   // a mark is shown on a faint copy of its host letter
+  // the advance box of a glyph (a mark: its host's box, widened to fit it)
+  function setFrame(svg, L, sizePx) {
+    var em = MET.em, k = sizePx / em, host = isMark(L) ? markHost(L) : null;
+    var s = spacingOf(host || L), vx = s.x0 - s.lsb, vw = s.adv;
+    if (host) {
       var hb = GC.bbox(displayRings(L));
       if (hb) { var x0 = Math.min(vx, hb[0] - 4), x1 = Math.max(vx + vw, hb[2] + 4); vx = x0; vw = x1 - x0; }
-      var gh = document.createElementNS(NS, 'use');
-      gh.setAttribute('href', '#' + gid(host));
-      gh.setAttribute('fill', 'currentColor');
-      gh.setAttribute('opacity', '0.16');
-      svg.appendChild(gh);
     }
     var y0 = MET.base - ASC_EM * em, h = (ASC_EM + DESC_EM) * em;
     svg.setAttribute('viewBox', vx.toFixed(2) + ' ' + y0.toFixed(2) + ' ' + vw.toFixed(2) + ' ' + h.toFixed(2));
     svg.setAttribute('width', (vw * k).toFixed(2));
     svg.setAttribute('height', (h * k).toFixed(2));
+  }
+  function glyphSvg(L, sizePx, mode) {
+    var svg = document.createElementNS(NS, 'svg');
+    if (isMark(L)) {   // a mark is shown on a faint copy of its host letter
+      var gh = document.createElementNS(NS, 'use');
+      gh.setAttribute('href', '#' + gid(markHost(L)));
+      gh.setAttribute('fill', 'currentColor');
+      gh.setAttribute('opacity', '0.16');
+      svg.appendChild(gh);
+    }
+    setFrame(svg, L, sizePx);
     if (mode === 'text') {
       svg.style.marginTop = (-ASC_EM * sizePx).toFixed(2) + 'px';
       svg.style.marginBottom = (-DESC_EM * sizePx).toFixed(2) + 'px';
@@ -2498,10 +2505,10 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12
   function refreshGlyphSet() {
     var color = state.ink === '#000000' ? '#fff' : state.ink;
     glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (cell) {
-      var L = cell.dataset.letter;
+      var L = cell.dataset.letter, svg = cell.firstChild;
       cell.style.color = color;
-      cell.innerHTML = '';
-      cell.appendChild(glyphSvg(L, cellSize, 'cell'));
+      if (svg) setFrame(svg, L, cellSize);
+      else cell.appendChild(glyphSvg(L, cellSize, 'cell'));
       cell.classList.toggle('edited', isEdited(L));
     });
   }
@@ -2750,7 +2757,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[42, -2, 12], [28, 46, 12
       queued = false;
       refreshDefs();          // instances are <use>, so outlines update everywhere at once
       renderEditor();
-      refreshGlyphSet();
+      if (!state.draft) refreshGlyphSet();   // cell frames catch up when the slider is let go
       // advance widths and kerning follow a beat later, so dragging stays light
       clearTimeout(repaintT);
       repaintT = setTimeout(repaintAllTesters, 140);

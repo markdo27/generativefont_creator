@@ -2,10 +2,10 @@
 // Metaball / SDF letterform engine.
 //
 // A glyph is a set of chains of NODES, each node carrying its own radius.
-// Consecutive nodes are joined by a tapered capsule (radius lerps along the
-// segment -> variable stroke thickness). All capsules are combined with a
-// polynomial smooth-minimum, which makes the mass pool and bulge where
-// strokes meet, exactly like a viscous liquid.
+// Each chain is drawn as a smooth spline through its nodes (radius splined
+// too -> variable stroke thickness), cut into short tapered capsules. The
+// strokes are combined with a polynomial smooth-minimum, which makes the mass
+// pool into the joints where strokes meet, exactly like a viscous liquid.
 //
 // The resulting scalar field is contoured with marching squares and then
 // Chaikin-smoothed, so every edge comes out round -- there are no straight
@@ -33,26 +33,6 @@
   }
 
   // ------------------------------------------------------------------ sdf
-  // Tapered capsule: distance to the segment a-b whose radius lerps ra->rb.
-  function sdTaperedCapsule(px, py, ax, ay, ra, bx, by, rb) {
-    var bax = bx - ax, bay = by - ay;
-    var l2 = bax * bax + bay * bay;
-    var t = l2 > 1e-9 ? ((px - ax) * bax + (py - ay) * bay) / l2 : 0;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    var cx = ax + bax * t, cy = ay + bay * t;
-    var dx = px - cx, dy = py - cy;
-    return Math.sqrt(dx * dx + dy * dy) - (ra + (rb - ra) * t);
-  }
-
-  // Polynomial smooth minimum — the "melt". k=0 is a hard union.
-  function smin(a, b, k) {
-    if (k <= 1e-6) return a < b ? a : b;
-    var h = k - Math.abs(a - b);
-    if (h < 0) h = 0;
-    h /= k;
-    return (a < b ? a : b) - h * h * k * 0.25;
-  }
-
   // ------------------------------------------------------------ presets
   // The Flow states, shared by the Font tool and the Poster tool. Melt is
   // capped per point (see makeField), so counters stay open even when the
@@ -298,7 +278,7 @@
         if (t < 0) t = 0; else if (t > 1) t = 1;
         var dx = px - ax - BX[i] * t, dy = py - ay - BY[i] * t;
         var len = Math.sqrt(dx * dx + dy * dy);
-        var di = len - (RA[i] + DR[i] * t);
+        var di = len - (RA[i] + DR[i] * t);    // tapered-capsule distance
         if (PC[i] !== curP) {
           if (curP >= 0) {                       // fold the finished piece in
             ad = d > pm ? d - pm : pm - d;

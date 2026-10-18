@@ -135,7 +135,17 @@
     return c ? c.rings : [];
   }
   function canDraw(L) { return (FLAT[L] && !isMark(L)) || !!GC.plan(L, hasKey); }
+  // path strings are cached per traced ring set (rings are immutable once
+  // traced), so a spacing-only change rebuilds no geometry text at all
+  var dCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function ringsToD(rings) {
+    var hit = dCache && dCache.get(rings);
+    if (hit !== undefined) return hit;
+    var d = ringsToDRaw(rings);
+    if (dCache) dCache.set(rings, d);
+    return d;
+  }
+  function ringsToDRaw(rings) {
     var d = '';
     for (var i = 0; i < rings.length; i++) {
       var r = rings[i];
@@ -278,7 +288,6 @@
   // few-hundred-point outline. Composites met in preview text are added on
   // demand.
   var extraKeys = {};
-  function defKeys() { return LETTERS.concat(VIET, Object.keys(extraKeys)); }
   // a lone mark is shown where it would sit on a host letter
   function markHost(m) { return m === '̵' ? 'D' : 'O'; }
   function markPlacement(m) {
@@ -291,46 +300,61 @@
     var p = markPlacement(L);
     return GC.shift(ringsOf(L), p.ox, p.oy);
   }
+  // A composite's def reuses its base outline through <use> and only adds
+  // its marks, so 67 Vietnamese letters cost 67 small mark paths rather than
+  // 67 copies of A E I O U Y. Fused bases (Ơ Ư Đ) get one def each.
+  var fusedDefs = {};
+  function defMarkup(L) {
+    var c = !FLAT[L] && compositeOf(L);
+    if (!c) return '<path id="' + gid(L) + '" d="' + ringsToD(displayRings(L)) + '" fill-rule="nonzero"/>';
+    var pre = '';
+    if (c.baseKey !== c.parts[0].key && !fusedDefs[c.baseKey]) {
+      fusedDefs[c.baseKey] = 1;
+      pre = '<path id="' + gid(c.baseKey) + '" d="' + ringsToD(c.baseRings) + '" fill-rule="nonzero"/>';
+    }
+    return pre + '<g id="' + gid(L) + '"><use href="#' + gid(c.baseKey) + '"/><path d="' +
+      ringsToDRaw(c.rings.slice(c.baseCount)) + '" fill-rule="nonzero"/></g>';
+  }
   function refreshDefs() {
-    SPC = {}; KERN = {};
+    SPC = {}; KERN = {}; fusedDefs = {};
     measureMetrics();
     var out = '';
-    defKeys().concat(MARK_KEYS).forEach(function (L) {
-      out += '<path id="' + gid(L) + '" d="' + ringsToD(displayRings(L)) + '" fill-rule="nonzero"/>';
-    });
+    MARK_KEYS.concat(LETTERS, VIET, Object.keys(extraKeys)).forEach(function (L) { out += defMarkup(L); });
     defsInner.innerHTML = out;
   }
   function ensureDef(L) {
     if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0) return;
     extraKeys[L] = 1;
-    var p = document.createElementNS(NS, 'path');
-    p.setAttribute('id', gid(L));
-    p.setAttribute('d', ringsToD(ringsOf(L)));
-    defsInner.appendChild(p);
+    defsInner.insertAdjacentHTML('beforeend', defMarkup(L));
   }
 
   // mode 'text': the svg's margin box collapses onto the baseline, so the
   // line box comes from CSS line-height alone and glyphs overhang into the
   // leading exactly as a real font's do. mode 'cell': a full ascender-to-
   // descender frame, for grids where every cell must line up.
-  function glyphSvg(L, sizePx, mode) {
-    var em = MET.em, k = sizePx / em, svg = document.createElementNS(NS, 'svg');
-    var vx, vw, host = isMark(L) ? markHost(L) : null;
-    var s = spacingOf(host || L);
-    vx = s.x0 - s.lsb; vw = s.adv;
-    if (host) {   // a mark is shown on a faint copy of its host letter
+  // the advance box of a glyph (a mark: its host's box, widened to fit it)
+  function setFrame(svg, L, sizePx) {
+    var em = MET.em, k = sizePx / em, host = isMark(L) ? markHost(L) : null;
+    var s = spacingOf(host || L), vx = s.x0 - s.lsb, vw = s.adv;
+    if (host) {
       var hb = GC.bbox(displayRings(L));
       if (hb) { var x0 = Math.min(vx, hb[0] - 4), x1 = Math.max(vx + vw, hb[2] + 4); vx = x0; vw = x1 - x0; }
-      var gh = document.createElementNS(NS, 'use');
-      gh.setAttribute('href', '#' + gid(host));
-      gh.setAttribute('fill', 'currentColor');
-      gh.setAttribute('opacity', '0.16');
-      svg.appendChild(gh);
     }
     var y0 = MET.base - ASC_EM * em, h = (ASC_EM + DESC_EM) * em;
     svg.setAttribute('viewBox', vx.toFixed(2) + ' ' + y0.toFixed(2) + ' ' + vw.toFixed(2) + ' ' + h.toFixed(2));
     svg.setAttribute('width', (vw * k).toFixed(2));
     svg.setAttribute('height', (h * k).toFixed(2));
+  }
+  function glyphSvg(L, sizePx, mode) {
+    var svg = document.createElementNS(NS, 'svg');
+    if (isMark(L)) {   // a mark is shown on a faint copy of its host letter
+      var gh = document.createElementNS(NS, 'use');
+      gh.setAttribute('href', '#' + gid(markHost(L)));
+      gh.setAttribute('fill', 'currentColor');
+      gh.setAttribute('opacity', '0.16');
+      svg.appendChild(gh);
+    }
+    setFrame(svg, L, sizePx);
     if (mode === 'text') {
       svg.style.marginTop = (-ASC_EM * sizePx).toFixed(2) + 'px';
       svg.style.marginBottom = (-DESC_EM * sizePx).toFixed(2) + 'px';
@@ -578,10 +602,10 @@
   function refreshGlyphSet() {
     var color = state.ink === '#000000' ? '#fff' : state.ink;
     glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (cell) {
-      var L = cell.dataset.letter;
+      var L = cell.dataset.letter, svg = cell.firstChild;
       cell.style.color = color;
-      cell.innerHTML = '';
-      cell.appendChild(glyphSvg(L, cellSize, 'cell'));
+      if (svg) setFrame(svg, L, cellSize);
+      else cell.appendChild(glyphSvg(L, cellSize, 'cell'));
       cell.classList.toggle('edited', isEdited(L));
     });
   }
@@ -830,7 +854,7 @@
       queued = false;
       refreshDefs();          // instances are <use>, so outlines update everywhere at once
       renderEditor();
-      refreshGlyphSet();
+      if (!state.draft) refreshGlyphSet();   // cell frames catch up when the slider is let go
       // advance widths and kerning follow a beat later, so dragging stays light
       clearTimeout(repaintT);
       repaintT = setTimeout(repaintAllTesters, 140);
