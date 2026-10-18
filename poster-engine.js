@@ -818,8 +818,9 @@
           dy += dir * need;
           placed = shiftCmds(mcmds, dx, dy);
         }
-        obstacles.push(cmdsToRings(placed));
       }
+      // attached parts (a horn) are obstacles for the marks after them too
+      obstacles.push(cmdsToRings(placed));
       var pb = cmdsBox(placed);
       if (above && pb) { top = Math.min(top, pb[1]); prev = m; prevBox = pb; }
       if (dir > 0 && pb) bottom = Math.max(bottom, pb[3]);
