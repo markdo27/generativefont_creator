@@ -146,6 +146,22 @@
   // buffer: ArrayBuffer (or typed array) holding an 'OTTO' / 0x00010000 sfnt.
   // tables: { 'GPOS': Uint8Array, ... } -- adds or replaces; null removes.
   // Returns a fresh ArrayBuffer; the input is never modified.
+  // A copy of one table's bytes from an sfnt, or null — for patching a table
+  // opentype.js wrote (e.g. OS/2 flags) before injecting it back.
+  function readTable(buffer, tag) {
+    var src = ArrayBuffer.isView(buffer)
+      ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+      : new Uint8Array(buffer);
+    var dv = new DataView(src.buffer, src.byteOffset, src.byteLength), n = dv.getUint16(4);
+    for (var i = 0; i < n; i++) {
+      var rec = 12 + 16 * i;
+      if (String.fromCharCode(src[rec], src[rec + 1], src[rec + 2], src[rec + 3]) !== tag) continue;
+      var o = dv.getUint32(rec + 8);
+      return src.slice(o, o + dv.getUint32(rec + 12));
+    }
+    return null;
+  }
+
   function injectTables(buffer, tables) {
     var src = ArrayBuffer.isView(buffer)
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
@@ -194,6 +210,7 @@
   }
 
   return {
+    readTable: readTable,
     gposKern: gposKern,
     injectTables: injectTables,
     checksum: checksum,

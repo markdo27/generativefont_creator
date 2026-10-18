@@ -57,8 +57,8 @@
     gapTop: 6,      // mark line (cap ink top) -> first mark ink bottom
     gapStack: 3,    // mark ink top -> next mark ink bottom
     gapBottom: 6,   // foot line (base ink bottom) -> dot-below ink top
-    sideDX: 13,     // tone beside circumflex: origin offset from the anchor
-    sideRise: 9,    // ...and how far its ink bottom sits above the circumflex's middle
+    sideTuck: 3,    // tone beside circumflex: how far its ink tucks over the circumflex's outer edge
+    sideRise: 0.55, // ...and where its ink bottom sits, as a fraction of the circumflex height
     squash: 0.8,    // height of a circumflex/breve that carries a tone
     clear: 3,       // a floating mark never comes closer than this to the base
   };
@@ -151,8 +151,9 @@
   function shift(rings, dx, dy) {
     return rings.map(function (r) { return r.map(function (p) { return [p[0] + dx, p[1] + dy]; }); });
   }
+  // keeps any 4th element: [x,y,r,1] starts a hard-unioned (unmelted) group
   function shiftChains(chains, dx, dy) {
-    return chains.map(function (c) { return c.map(function (n) { return [n[0] + dx, n[1] + dy, n[2]]; }); });
+    return chains.map(function (c) { return c.map(function (n) { var o = n.slice(); o[0] += dx; o[1] += dy; return o; }); });
   }
 
   function fusedAnchor(base, mark, plainBox) {
@@ -183,26 +184,54 @@
     }
     return [top, bot];
   }
-  // Push a placed mark up (dir -1) or down (dir 1) until no point of it is
-  // within `clear` of the base outline (cheap point-to-point test).
-  function clearance(placed, base, clear) {
-    var worst = 0;
-    for (var i = 0; i < placed.length; i++) {
-      for (var j = 0; j < placed[i].length; j += 2) {
-        var p = placed[i][j];
-        for (var a = 0; a < base.length; a++) {
-          var r = base[a];
-          for (var b = 0; b < r.length; b += 2) {
-            var dx = p[0] - r[b][0], dy = p[1] - r[b][1];
-            if (dx * dx + dy * dy < clear * clear) {
-              var need = clear - Math.sqrt(dx * dx + dy * dy);
-              if (need > worst) worst = need;
-            }
-          }
-        }
+  // Smallest distance from any vertex of one ring set to any edge of
+  // another (and vice versa), within a band of interest. Used to keep each
+  // floating mark at least LAYOUT.clear away from the letter and from the
+  // marks already placed.
+  function segDist(p, a, b) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+    var t = l2 > 1e-9 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    var ex = p[0] - a[0] - t * dx, ey = p[1] - a[1] - t * dy;
+    return Math.sqrt(ex * ex + ey * ey);
+  }
+  function minGap(ra, rb, limit) {
+    var ba = bbox(ra), bb = bbox(rb);
+    if (!ba || !bb || ba[0] > bb[2] + limit || bb[0] > ba[2] + limit || ba[1] > bb[3] + limit || bb[1] > ba[3] + limit) return Infinity;
+    // only geometry inside the overlap of the two boxes can be closest
+    var bx = [Math.max(ba[0], bb[0]) - limit, Math.max(ba[1], bb[1]) - limit,
+              Math.min(ba[2], bb[2]) + limit, Math.min(ba[3], bb[3]) + limit];
+    function inBox(q) { return q[0] >= bx[0] && q[0] <= bx[2] && q[1] >= bx[1] && q[1] <= bx[3]; }
+    function pts(R) { var o = []; R.forEach(function (r) { r.forEach(function (q) { if (inBox(q)) o.push(q); }); }); return o; }
+    function edges(R) {
+      var o = [];
+      R.forEach(function (r) { for (var k = 0; k < r.length; k++) { var a = r[k], b = r[(k + 1) % r.length]; if (inBox(a) || inBox(b)) o.push([a, b]); } });
+      return o;
+    }
+    var best = Infinity;
+    function scan(P, E) {
+      for (var i = 0; i < P.length; i++) for (var j = 0; j < E.length; j++) {
+        var d = segDist(P[i], E[j][0], E[j][1]);
+        if (d < best) best = d;
       }
     }
-    return worst;
+    scan(pts(ra), edges(rb)); scan(pts(rb), edges(ra));
+    return best;
+  }
+  // nudge a placed mark (dir -1 up, +1 down) until it clears every obstacle
+  function settle(mr, ox, oy, dir, obstacles) {
+    var placed = shift(mr, ox, oy);
+    for (var it = 0; it < 6; it++) {
+      var need = 0;
+      obstacles.forEach(function (o) {
+        var g = minGap(placed, o, LAYOUT.clear + 1);
+        if (g < LAYOUT.clear) need = Math.max(need, LAYOUT.clear - g + 0.25);
+      });
+      if (!need) break;
+      oy += dir * need;
+      placed = shift(mr, ox, oy);
+    }
+    return { oy: oy, placed: placed };
   }
 
   // Build a composite.
@@ -241,7 +270,7 @@
     var out = baseRings.slice();
 
     var top = Math.min(local[0] < 1e8 ? local[0] : bb[1], lines ? lines.cap : 1e9);
-    var prev = null, prevBox = null;
+    var prev = null, prevBox = null, obstacles = [baseRings];
     p.top.forEach(function (m, i) {
       var mr = api.rings(m);
       if (CARRIERS[m] && p.top[i + 1]) mr = squashRings(mr, LAYOUT.squash);
@@ -249,18 +278,20 @@
       if (!mb) return;
       var ox, oy, side = prev === CIRC && BESIDE_CIRC[m];
       if (side) {
-        ox = ax + LAYOUT.sideDX * side;
-        oy = prevBox[1] + (prevBox[3] - prevBox[1]) * 0.5 - LAYOUT.sideRise - mb[3];
+        // measured from the circumflex's ink: the tone's near edge tucks just
+        // over the circumflex's outer edge, well clear of its apex
+        ox = side > 0 ? prevBox[2] - LAYOUT.sideTuck - mb[0] : prevBox[0] + LAYOUT.sideTuck - mb[2];
+        oy = prevBox[3] - (prevBox[3] - prevBox[1]) * LAYOUT.sideRise - mb[3];
       } else {
         ox = ax;
         oy = top - (prev ? LAYOUT.gapStack : LAYOUT.gapTop) - mb[3];
       }
-      var placed = shift(mr, ox, oy);
-      var push = clearance(placed, baseRings, LAYOUT.clear);
-      if (push > 0) { oy -= push; placed = shift(mr, ox, oy); }
-      out = out.concat(placed);
+      var st = settle(mr, ox, oy, -1, obstacles);
+      oy = st.oy;
+      out = out.concat(st.placed);
+      obstacles.push(st.placed);
       parts.push({ key: m, ox: ox, oy: oy, zone: 'top' });
-      prevBox = bbox(placed);
+      prevBox = bbox(st.placed);
       if (prevBox[1] < top) top = prevBox[1];
       prev = m;
     });
@@ -269,13 +300,10 @@
     p.bottom.forEach(function (m) {
       var mr = api.rings(m), mb = bbox(mr);
       if (!mb) return;
-      var ox = ax, oy = bottom + LAYOUT.gapBottom - mb[1];
-      var placed = shift(mr, ox, oy);
-      var push = clearance(placed, baseRings, LAYOUT.clear);
-      if (push > 0) { oy += push; placed = shift(mr, ox, oy); }
-      out = out.concat(placed);
-      parts.push({ key: m, ox: ox, oy: oy, zone: 'bottom' });
-      bottom = bbox(placed)[3];
+      var st = settle(mr, ax, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
+      out = out.concat(st.placed);
+      parts.push({ key: m, ox: ax, oy: st.oy, zone: 'bottom' });
+      bottom = bbox(st.placed)[3];
     });
 
     // baseKey/baseCount let a renderer reuse the base outline (plain or

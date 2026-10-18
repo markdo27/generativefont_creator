@@ -26,7 +26,7 @@
     <main class="workspace">
       <aside class="editor-panel" aria-label="Glyph editor">
         <div class="panel-label">Glyph editor — <span id="letterBadge">A</span></div>
-        <div class="editor-canvas-wrap" id="editorWrap" tabindex="0" aria-label="Glyph canvas. Tab cycles nodes, arrow keys move the selected node, alt plus arrows resize it.">
+        <div class="editor-canvas-wrap" id="editorWrap" tabindex="0" aria-label="Glyph canvas. Enter selects the first node, Tab and Shift Tab walk the nodes, arrow keys move the selected node, alt plus arrows resize it, Escape then Tab leaves the canvas.">
           <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
         </div>
         <div class="zoom-row" role="group" aria-label="Canvas zoom">
@@ -199,7 +199,8 @@
       <dt>Ctrl/⌘ Z · Shift Ctrl/⌘ Z</dt><dd>Undo · redo</dd>
       <dt>Ctrl/⌘ S · Ctrl/⌘ O</dt><dd>Save · open project file</dd>
       <dt>[ · ]</dt><dd>Previous · next glyph</dd>
-      <dt>Tab (canvas focused)</dt><dd>Select next node</dd>
+      <dt>Enter · Tab (canvas focused)</dt><dd>First node · next node (Shift: previous)</dd>
+      <dt>Esc, then Tab</dt><dd>Deselect, leave the canvas</dd>
       <dt>Arrows · Shift arrows</dt><dd>Move node 1 · 10 units</dd>
       <dt>Alt arrows</dt><dd>Swell · pinch the node</dd>
       <dt>Delete · Esc</dt><dd>Remove node · deselect</dd>

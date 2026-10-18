@@ -38,12 +38,12 @@
   // capped per point (see makeField), so counters stay open even when the
   // mass is allowed to pool heavily at the joints.
   var PRESETS = {
-    liquid:  { mass: 0.98, melt: 14, tension: -4,   wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
-    mercury: { mass: 1.00, melt: 22, tension: -3,   wobble: 0,   grain: 0.045, smooth: 3, res: 1.6 },
-    acid:    { mass: 1.00, melt: 17, tension: -3,   wobble: 2.6, grain: 0.050, smooth: 3, res: 1.5 },
-    molten:  { mass: 1.04, melt: 19, tension: -1.5, wobble: 1.2, grain: 0.040, smooth: 3, res: 1.6 },
-    bubble:  { mass: 0.94, melt: 7,  tension: -7,   wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
-    goo:     { mass: 1.01, melt: 18, tension: -2.5, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
+    liquid:  { mass: 0.98, melt: 14, tension: -4,   wobble: 1.1, grain: 0.038, smooth: 2, res: 1.6 },
+    mercury: { mass: 1.02, melt: 24, tension: -2.5, wobble: 0,   grain: 0.045, smooth: 3, res: 1.6 },
+    acid:    { mass: 0.98, melt: 16, tension: -3.5, wobble: 3.0, grain: 0.075, smooth: 3, res: 1.5 },
+    molten:  { mass: 1.08, melt: 19, tension: -1.5, wobble: 1.4, grain: 0.035, smooth: 3, res: 1.6 },
+    bubble:  { mass: 1.12, melt: 9,  tension: -2,   wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
+    goo:     { mass: 1.02, melt: 18, tension: -2.5, wobble: 3.8, grain: 0.06,  smooth: 3, res: 1.5 },
   };
 
   // ------------------------------------------------------------- skeleton
@@ -713,8 +713,31 @@
     return ringsFromField(field, bounds, o, opts._debug);
   }
 
+  // ----------------------------------------------------------- curve output
+  // Traced rings are polygons. For display and export each edge becomes one
+  // cubic, tangent-continuous through every point: the tangent at a point
+  // follows the chord between its neighbours, and each handle is a third of
+  // its own edge long, so the uneven spacing Douglas-Peucker leaves (long
+  // edges on flats, short ones on curves) can't make the curve overshoot.
+  // Returns [[p0, c1, c2, p1], ...] for a closed ring.
+  function ringToCubics(ring) {
+    var n = ring.length, tan = new Array(n), out = new Array(n);
+    for (var i = 0; i < n; i++) {
+      var a = ring[(i + n - 1) % n], b = ring[(i + 1) % n];
+      var dx = b[0] - a[0], dy = b[1] - a[1], l = Math.sqrt(dx * dx + dy * dy) || 1;
+      tan[i] = [dx / l, dy / l];
+    }
+    for (var j = 0; j < n; j++) {
+      var p = ring[j], q = ring[(j + 1) % n], tq = tan[(j + 1) % n];
+      var h = Math.sqrt((q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1])) / 3;
+      out[j] = [p, [p[0] + tan[j][0] * h, p[1] + tan[j][1] * h], [q[0] - tq[0] * h, q[1] - tq[1] * h], q];
+    }
+    return out;
+  }
+
   return {
     PRESETS: PRESETS,
+    ringToCubics: ringToCubics,
     glyphRings: glyphRings,
     signedArea: signedArea,
     traceField: traceField,
