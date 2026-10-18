@@ -40,17 +40,24 @@ automatic kerning.
   **Typeface** — either the built-in Liquid glyph set or an uploaded font
   (`.ttf`/`.otf`/`.woff`, parsed with opentype.js). For the built-in set the
   letterforms themselves are adjustable here: the Font tool's flow-state
-  presets plus Weight / Fuse / Tension / Wobble feed `BlobEngine.glyphRings`,
-  so the whole alphabet can be reshaped without leaving the poster. (Per-glyph
-  node editing still lives in the Font tool.)
+  presets plus Mass / Melt / Tension / Wobble feed `BlobEngine.glyphRings`,
+  so the whole alphabet can be reshaped without leaving the poster. Per-glyph
+  node editing lives in the Font tool, and its edits come across: when the
+  Font tool has saved a project in this browser, *Use my Font-tool glyphs*
+  swaps in your skeletons and marks (and *Match its flow state & accents*
+  adopts its shape settings too). Text is read as letter + accent clusters
+  through `glyph-compose.js`, so Vietnamese works in both title styles; an
+  uploaded font missing a precomposed letter has it rebuilt from base + mark
+  glyphs.
 
   **Big title** — any number of independent rows, each with its own text,
   tracking, transform and *style*. Each row is rasterized to its own mask,
   which is blurred, thresholded, converted to a signed distance field and
   contoured with `BlobEngine.traceField` — the same marching-squares pipeline the
   Font tool uses per glyph, just fed a raster-derived field instead of an
-  analytic one. The blur + threshold is what fuses the letterforms into a
-  single molten mass.
+  analytic one. The blur + threshold (*Merge*) is what fuses the letterforms
+  into a single molten mass; floating accents are drawn after it, so they stay
+  separate from their letters.
 
   Each row is transformed directly on the canvas: drag the box to move, corner
   handles to resize, the stem handle above it to rotate (hold shift to snap to

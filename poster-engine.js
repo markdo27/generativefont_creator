@@ -24,17 +24,26 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var GH = GLYPH_DATA.H, GW = GLYPH_DATA.W, BASE = GLYPH_DATA.glyphs;
+  // Accent composition (Vietnamese and friends) is shared with the Font tool.
+  // Everything below still works without it, minus composed letters.
+  var GC = typeof GlyphCompose !== 'undefined' ? GlyphCompose : null;
   var SIDE = 5, SPACE = 30;
+  var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
   // Flow states lifted from the Font tool, so a shape sculpted there can be
-  // reproduced here by name.
+  // reproduced here by name. The Font tool may export its own table as
+  // BlobEngine.PRESETS; when it does, that is the single source of truth.
   var GLYPH_PRESETS = {
-    liquid: { mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2 },
-    mercury: { mass: 1.05, melt: 24, tension: -2, wobble: 0, grain: 0.045, smooth: 3 },
-    acid: { mass: 1.08, melt: 26, tension: -2, wobble: 2.2, grain: 0.050, smooth: 3 },
-    molten: { mass: 1.16, melt: 30, tension: 2, wobble: 1.2, grain: 0.040, smooth: 3 },
-    bubble: { mass: 0.94, melt: 7, tension: -7, wobble: 0, grain: 0.045, smooth: 2 },
-    goo: { mass: 1.10, melt: 20, tension: 0, wobble: 3.6, grain: 0.070, smooth: 3 },
+    liquid: { mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
+    mercury: { mass: 1.05, melt: 24, tension: -2, wobble: 0, grain: 0.045, smooth: 3, res: 1.6 },
+    acid: { mass: 1.08, melt: 26, tension: -2, wobble: 2.2, grain: 0.050, smooth: 3, res: 1.5 },
+    molten: { mass: 1.16, melt: 30, tension: 2, wobble: 1.2, grain: 0.040, smooth: 3, res: 1.6 },
+    bubble: { mass: 0.94, melt: 7, tension: -7, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
+    goo: { mass: 1.10, melt: 20, tension: 0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
   };
+  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
+  function presetTable() {
+    return (typeof BlobEngine !== 'undefined' && BlobEngine.PRESETS) || GLYPH_PRESETS;
+  }
 
   var SIZE_PRESETS = {
     square: [1200, 1200], portrait: [1000, 1333], tall: [1080, 1920], landscape: [1333, 1000],
@@ -109,9 +118,18 @@
 
   var state = {
     fontSource: 'builtin', uploadedFont: null, uploadedFontName: '',
-    glyph: { preset: 'liquid', mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2 },
+    glyph: { preset: 'liquid', mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
 
-    bigRows: [makeRow({ text: 'TEMPO' })],
+    // Filled, so the first thing on screen is as solid as the Font tool's
+    // specimen; the Vietnamese subhead ("night tempo") shows the composed
+    // accents and the second title style without crowding the headline.
+    bigRows: [
+      makeRow({ text: 'TEMPO', mode: 'filled', yp: 41, fit: 0.8 }),
+      makeRow({
+        text: 'NHỊP ĐÊM', yp: 62, fit: 0.56,
+        style: 'ink', mode: 'filled', flow: 12, slant: 6, weight: 0.7,
+      }),
+    ],
     smallBlocks: [
       makeBlock({
         text: 'TEMPO CLUB / 00:00\n012KM NIGHT LOOP',
@@ -132,6 +150,7 @@
   // -------------------------------------------------------------- utilities
   var toastTimer = null;
   function toast(msg, ms) {
+    // role=status + aria-live on #toast: the text change is what gets announced
     var el = $('toast'); el.textContent = msg; el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, ms || 2200);
@@ -144,7 +163,9 @@
   }
   function safeName() {
     var t = (state.bigRows[0] && state.bigRows[0].text) || 'poster';
-    return t.trim().replace(/[^a-z0-9\-_]+/gi, '-').toLowerCase() || 'poster';
+    // fold accents so "TIẾNG VIỆT" names the file tieng-viet, not ti-ng-vi-t
+    t = t.replace(/[Đđ]/g, 'd').normalize('NFD').replace(/\p{M}+/gu, '');
+    return t.trim().replace(/[^a-z0-9\-_]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'poster';
   }
   function escapeXml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function mk(tag, cls, txt) {
@@ -156,57 +177,310 @@
   function findRow(id) { for (var i = 0; i < state.bigRows.length; i++) if (state.bigRows[i].id === id) return state.bigRows[i]; return null; }
   function findBlock(id) { for (var i = 0; i < state.smallBlocks.length; i++) if (state.smallBlocks[i].id === id) return state.smallBlocks[i]; return null; }
 
+  // ------------------------------------------------- Font-tool project link
+  // The Font tool autosaves its project (every letter and accent skeleton with
+  // the user's node edits, plus its shape and accent spacing) to localStorage.
+  // When one is there the poster draws with those skeletons instead of the
+  // stock ones. It is another page's data, so nothing is trusted: every number
+  // is checked before it reaches the tracer, and a bad glyph is dropped on its
+  // own rather than taking the whole project down with it.
+  var PROJECT_KEY = 'liquidfont.project.v1';
+  var project = null;     // validated project, or null
+  var projectRaw;         // the raw string it was read from (undefined = never read)
+  var link = {
+    use: true,            // draw with the project's skeletons
+    shape: true,          // ...and adopt its flow state + accent spacing
+    saved: null,          // poster settings from before matching, restored on opt-out
+  };
+  var srcVer = 0;         // bumped whenever the glyph source changes (cache key)
+  var DEFAULT_LAYOUT = GC ? copyObj(GC.LAYOUT) : null;
+
+  var SHAPE_LIMITS = {
+    mass: [0.3, 3], melt: [0, 80], tension: [-40, 40], wobble: [0, 20],
+    grain: [0.001, 0.5], smooth: [0, 6], res: [0.8, 4],
+  };
+  var MARK_LIMITS = { scale: [0.5, 1.6], gapTop: [0, 30], gapStack: [0, 30], gapBottom: [0, 30] };  // as the Font tool clamps them
+
+  function copyObj(o) { var c = {}; for (var k in o) if (hasOwn(o, k)) c[k] = o[k]; return c; }
+  function finite(v) { return typeof v === 'number' && isFinite(v); }
+  function clampTo(v, lim) { return Math.max(lim[0], Math.min(lim[1], v)); }
+
+  // [[[x, y, r], ...], ...] with sane finite numbers, or null.
+  function validChains(v) {
+    if (!Array.isArray(v) || !v.length || v.length > 64) return null;
+    var out = [];
+    for (var i = 0; i < v.length; i++) {
+      var c = v[i];
+      if (!Array.isArray(c) || !c.length || c.length > 256) return null;
+      var cc = [];
+      for (var j = 0; j < c.length; j++) {
+        var n = c[j];
+        if (!Array.isArray(n) || n.length < 3) return null;
+        var x = n[0], y = n[1], r = n[2];
+        if (!finite(x) || !finite(y) || !finite(r)) return null;
+        if (Math.abs(x) > 2000 || Math.abs(y) > 2000 || r < 0 || r > 400) return null;
+        // optional 4th element: 1 starts a new melt group (blob-engine)
+        cc.push(n.length > 3 && n[3] === 1 ? [x, y, Math.max(0.5, r), 1] : [x, y, Math.max(0.5, r)]);
+      }
+      out.push(cc);
+    }
+    return out;
+  }
+
+  function validateProject(p) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+    if (p.app != null && p.app !== 'liquid.font') return null;
+    if (p.version != null && p.version !== 1) return null;
+    if (!p.chains || typeof p.chains !== 'object' || Array.isArray(p.chains)) return null;
+    var chains = Object.create(null), count = 0, edited = 0;
+    Object.keys(p.chains).slice(0, 600).forEach(function (k) {
+      if (!k || k.length > 8) return;
+      var c = validChains(p.chains[k]);
+      if (!c) return;
+      chains[k] = c; count++;
+      if (!hasOwn(BASE, k) || JSON.stringify(BASE[k]) !== JSON.stringify(c)) edited++;
+    });
+    if (!count) return null;
+
+    var out = {
+      chains: chains, count: count, edited: edited,
+      fontName: typeof p.fontName === 'string' ? p.fontName.slice(0, 60) : '',
+      preset: typeof p.preset === 'string' && hasOwn(presetTable(), p.preset) && !p.presetEdited ? p.preset : 'custom',
+      seed: finite(p.seed) ? Math.round(Math.max(-1e6, Math.min(1e6, p.seed))) : null,
+      shape: null, marks: null,
+    };
+    if (p.shape && typeof p.shape === 'object') {
+      var sh = {}, nShape = 0;
+      SHAPE_KEYS.forEach(function (k) {
+        if (finite(p.shape[k])) { sh[k] = clampTo(p.shape[k], SHAPE_LIMITS[k]); nShape++; }
+      });
+      if (nShape) out.shape = sh;
+    }
+    if (p.marks && typeof p.marks === 'object') {
+      var mk2 = {}, nMarks = 0;
+      Object.keys(MARK_LIMITS).forEach(function (k) {
+        if (finite(p.marks[k])) { mk2[k] = clampTo(p.marks[k], MARK_LIMITS[k]); nMarks++; }
+      });
+      if (nMarks) out.marks = mk2;
+    }
+    return out;
+  }
+
+  // Re-read storage. Returns true when the project actually changed.
+  function readProject() {
+    var raw = null;
+    try { raw = window.localStorage.getItem(PROJECT_KEY); } catch (e) { raw = null; }
+    if (raw === projectRaw) return false;
+    projectRaw = raw;
+    var p = null;
+    if (typeof raw === 'string' && raw.length < 8e6) {
+      try { p = validateProject(JSON.parse(raw)); } catch (e) { p = null; }
+    }
+    project = p;
+    return true;
+  }
+  function linked() { return !!(project && link.use); }
+
+  // Skeleton of a glyph or mark key from whichever source is active.
+  function chainsOf(k) {
+    if (linked() && k in project.chains) return project.chains[k];
+    return hasOwn(BASE, k) ? BASE[k] : null;
+  }
+  function hasGlyph(k) { return !!chainsOf(k); }
+  function isMark(k) { return !!(GC && GC.isMark(k)); }
+
+  // Same per-letter seeding as the Font tool, so with its seed the noise
+  // matches what the user saw there.
+  function glyphSeed() { return linked() && project.seed != null ? project.seed : 7; }
+
   // ------------------------------------------------------- built-in glyphs
   var builtinCache = {};
   function glyphKey() {
     var g = state.glyph;
-    return [g.mass, g.melt, g.tension, g.wobble, g.grain, g.smooth].join(',');
+    var lay = GC ? Object.keys(GC.LAYOUT).map(function (k) { return GC.LAYOUT[k]; }).join(':') : '';
+    return [srcVer, linked() ? 1 : 0, g.mass, g.melt, g.tension, g.wobble, g.grain, g.smooth, g.res, glyphSeed(), lay].join(',');
   }
-  function builtinRings(L) {
-    var key = L + '@' + glyphKey();
-    if (builtinCache[key]) return builtinCache[key];
-    var g = state.glyph, r;
-    try {
-      r = BlobEngine.glyphRings(BASE[L], {
-        mass: g.mass, melt: g.melt, tension: g.tension, wobble: g.wobble,
-        grain: g.grain, smooth: g.smooth, res: 1.6, simplify: 0.3,
-        seed: 7 + L.charCodeAt(0) * 13,
+  function cachePut(key, v) {
+    if (Object.keys(builtinCache).length > 700) builtinCache = {};
+    builtinCache[key] = v;
+    return v;
+  }
+  function traceOptsFor(k) {
+    var g = state.glyph;
+    var o = {
+      mass: g.mass, melt: g.melt, tension: g.tension, wobble: g.wobble,
+      grain: g.grain, smooth: g.smooth, res: g.res || 1.6, simplify: 0.3,
+      seed: glyphSeed() + k.charCodeAt(0) * 13,
+    };
+    return GC ? GC.traceOpts(k, o) : o;
+  }
+  // A glyph or mark traced in its own space. Floating marks go through
+  // markChains (global accent size) and traceOpts (gentler melt/tension).
+  function builtinRings(k) {
+    var key = 'g:' + k + '@' + glyphKey();
+    if (hasOwn(builtinCache, key)) return builtinCache[key];
+    var ch = chainsOf(k), r = [];
+    if (ch) {
+      try { r = BlobEngine.glyphRings(GC ? GC.markChains(k, ch) : ch, traceOptsFor(k)); }
+      catch (e) { console.error('glyph failed', k, e); r = []; }
+    }
+    return cachePut(key, r);
+  }
+  // Base + fused marks (horn, Đ bar) traced as one melted field.
+  function traceAs(chains, k) {
+    var key = 't:' + k + '@' + glyphKey();
+    if (hasOwn(builtinCache, key)) return builtinCache[key];
+    var r;
+    try { r = BlobEngine.glyphRings(chains, traceOptsFor(k)); }
+    catch (e) { console.error('glyph failed', k, e); r = []; }
+    return cachePut(key, r);
+  }
+  // Cap line and foot line of the whole set, so every accent in a word sits on
+  // one line (A's apex doesn't lift its acute above E's). Measured from ink
+  // over the same letters as the Font tool, so accents land where they do there.
+  function fontLines() {
+    var key = 'lines@' + glyphKey();
+    if (hasOwn(builtinCache, key)) return builtinCache[key];
+    var med = function (a) { a.sort(function (x, y) { return x - y; }); return a[a.length >> 1]; };
+    var edge = function (letters, i) {
+      var out = [];
+      Array.from(letters).forEach(function (k) {
+        var b = hasGlyph(k) && GC.bbox(builtinRings(k));
+        if (b) out.push(b[i]);
       });
-    } catch (e) { r = []; }
-    if (Object.keys(builtinCache).length > 400) builtinCache = {};
-    builtinCache[key] = r;
-    return r;
+      return out;
+    };
+    var tops = edge('HIETFZBDPRKL', 1), bots = edge('HIELNMKTFZ', 3);
+    return cachePut(key, tops.length && bots.length ? { cap: med(tops), foot: med(bots) } : null);
   }
+  var composeApi = {
+    rings: builtinRings,
+    chains: function (k) { return chainsOf(k) || []; },
+    trace: traceAs,
+    lines: fontLines,
+  };
+
+  // Text -> display clusters (base letter + its combining marks, NFC, caps).
+  function clustersOf(text) {
+    if (GC) return GC.clusters(text);
+    return (String(text).normalize('NFC').toUpperCase().match(/\P{M}\p{M}*|\p{M}+/gu) || []);
+  }
+  function isSpace(c) { return /^\s/.test(c); }
+
+  // One cluster of the built-in set, in glyph units, or null when it can't be
+  // drawn: { rings, parts, base, marks }. For composites `parts` says where
+  // each component's own origin landed and `marks` is the set of rings that
+  // are floating accents; `base` is the plain base letter, whose ink defines
+  // the cap band the row is anchored on.
+  function clusterGlyph(c) {
+    if (hasGlyph(c) && !isMark(c)) return { rings: builtinRings(c), parts: null, base: c, marks: null };
+    if (!GC) return null;
+    var key = 'c:' + c + '@' + glyphKey();
+    if (hasOwn(builtinCache, key)) return builtinCache[key];
+    var out = null, traced = null, seen = {};
+    // compose() passes the base rings through as-is and builds every placed
+    // accent fresh, so ring identity tells them apart; record exactly the
+    // arrays it was handed
+    var api = {
+      rings: function (k) { return (seen[k] = builtinRings(k)); },
+      chains: composeApi.chains, lines: composeApi.lines,
+      trace: function (ch, k) { return (traced = traceAs(ch, k)); },
+    };
+    try {
+      var comp = GC.compose(c, api, hasGlyph);
+      if (comp && comp.rings && comp.parts && comp.parts.length) {
+        var baseKey = comp.parts[0].key;
+        var baseSet = new Set(traced || seen[baseKey] || []);
+        var marks = comp.rings.filter(function (r) { return !baseSet.has(r); });
+        out = {
+          rings: comp.rings, parts: comp.parts, base: baseKey,
+          // nothing matched: compose copied the base after all, so draw it all as letter ink
+          marks: marks.length < comp.rings.length ? new Set(marks) : null,
+        };
+      }
+    } catch (e) { console.error('compose failed', c, e); out = null; }
+    return cachePut(key, out);
+  }
+
   function inkBounds(rings) {
     var a = 1e9, b = -1e9;
     rings.forEach(function (r) { r.forEach(function (p) { if (p[0] < a) a = p[0]; if (p[0] > b) b = p[0]; }); });
     return a > b ? [0, GW] : [a, b];
   }
+  function ringsYRange(rings) {
+    var a = 1e9, b = -1e9;
+    rings.forEach(function (r) { r.forEach(function (p) { if (p[1] < a) a = p[1]; if (p[1] > b) b = p[1]; }); });
+    return a > b ? null : [a, b];
+  }
+  function growBand(band, y0, y1) {
+    if (y0 < band[0]) band[0] = y0;
+    if (y1 > band[1]) band[1] = y1;
+  }
 
   // Lay out one row using the built-in glyph set. Returns the same shape as
-  // uploadRowLayout so the rest of the pipeline never has to know which font
+  // uploadRowGeom so the rest of the pipeline never has to know which font
   // source produced it.
   // Both layout builders hand back raw geometry rather than a finished shape,
   // so finishLayout can slant it and measure the result before anyone draws.
+  // `band` is the y-extent of the base letters alone (accents excluded), and
+  // `missing` lists the clusters the set could not draw.
   function builtinRowGeom(text, size, tracking) {
     var scale = size / GH, gap = tracking * size;
-    var x = 0, y = 0, polys = [];
-    for (var i = 0; i < text.length; i++) {
-      var ch = text[i];
-      if (/\s/.test(ch)) { x += SPACE * scale + gap; continue; }
-      var L = ch.toUpperCase();
-      if (!BASE[L]) { x += SPACE * scale + gap; continue; }
-      var rings = builtinRings(L), bb = inkBounds(rings);
+    var x = 0, y = 0, polys = [], markPolys = [], missing = [], band = [1e9, -1e9];
+    clustersOf(text).forEach(function (c) {
+      if (isSpace(c)) { x += SPACE * scale + gap; return; }
+      var cg = clusterGlyph(c);
+      if (!cg) { missing.push(c); x += SPACE * scale + gap; return; }
+      var rings = cg.rings, bb = inkBounds(rings);
       var w = (bb[1] - bb[0] + SIDE * 2) * scale;
       var ox = x - (bb[0] - SIDE) * scale;
       for (var r = 0; r < rings.length; r++) {
         var ring = rings[r], poly = new Array(ring.length);
         for (var p = 0; p < ring.length; p++) poly[p] = [ox + ring[p][0] * scale, y + ring[p][1] * scale];
-        polys.push(poly);
+        (cg.marks && cg.marks.has(ring) ? markPolys : polys).push(poly);
       }
+      var yr = ringsYRange(cg.parts ? builtinRings(cg.base) : rings);
+      if (yr) growBand(band, y + yr[0] * scale, y + yr[1] * scale);
       x += w + gap;
-    }
-    return { kind: 'polys', polys: polys, fallbackW: size * 0.6, fallbackH: size };
+    });
+    return {
+      kind: 'polys', polys: polys, markPolys: markPolys,
+      fallbackW: size * 0.6, fallbackH: size,
+      missing: missing, band: band[0] < band[1] ? band : null,
+    };
+  }
+
+  // A cluster's pen skeleton for Ink stroke: { base: chains, marks: chains },
+  // in glyph units. Composites reuse compose()'s placement and move each
+  // part's own chains to where its origin landed.
+  var CARRIERS = { '\u0302': 1, '\u0306': 1 };   // circumflex, breve
+  function clusterChains(c) {
+    if (hasGlyph(c) && !isMark(c)) return { base: chainsOf(c), marks: [] };
+    var cg = clusterGlyph(c);
+    if (!cg || !cg.parts) return null;
+    var base = [], marks = [];
+    cg.parts.forEach(function (part, i) {
+      var ch = chainsOf(part.key) || [];
+      if (part.zone === 'top' || part.zone === 'bottom') {
+        ch = GC.markChains(part.key, ch);
+        // compose() squashes a circumflex/breve that carries a tone; follow it
+        // so the tone placed against the squashed ring doesn't collide
+        var squash = GC.LAYOUT.squash;
+        if (part.zone === 'top' && CARRIERS[part.key] && finite(squash) && squash !== 1 &&
+            cg.parts.slice(i + 1).some(function (q) { return q.zone === 'top'; })) {
+          var yr = ringsYRange(builtinRings(part.key));
+          if (yr) {
+            ch = ch.map(function (cc) {
+              return cc.map(function (n) { return [n[0], yr[1] - (yr[1] - n[1]) * squash, n[2]]; });
+            });
+          }
+        }
+      }
+      var placed = GC.shiftChains(ch, part.ox, part.oy);
+      if (part.zone === 'top' || part.zone === 'bottom') marks = marks.concat(placed);
+      else base = base.concat(placed);
+    });
+    return { base: base, marks: marks };
   }
 
   // Ink style, built-in font only: the glyph data is already a set of node
@@ -215,29 +489,36 @@
   // strokes cross, instead of melting a fat silhouette into a blob.
   function builtinInkGeom(text, size, tracking, weight) {
     var scale = size / GH, gap = tracking * size;
-    var x = 0, chains = [];
-    for (var i = 0; i < text.length; i++) {
-      var ch = text[i];
-      if (/\s/.test(ch)) { x += SPACE * scale + gap; continue; }
-      var L = ch.toUpperCase();
-      if (!BASE[L]) { x += SPACE * scale + gap; continue; }
+    var x = 0, chains = [], markChains = [], missing = [], band = [1e9, -1e9];
+    clustersOf(text).forEach(function (c) {
+      if (isSpace(c)) { x += SPACE * scale + gap; return; }
+      var cc = clusterChains(c);
+      if (!cc) { missing.push(c); x += SPACE * scale + gap; return; }
+      var all = cc.base.concat(cc.marks);
       var nmin = 1e9, nmax = -1e9;
-      BASE[L].forEach(function (c) {
-        c.forEach(function (n) {
+      all.forEach(function (ch) {
+        ch.forEach(function (n) {
           if (n[0] - n[2] < nmin) nmin = n[0] - n[2];
           if (n[0] + n[2] > nmax) nmax = n[0] + n[2];
         });
       });
+      if (nmin > nmax) { nmin = 0; nmax = GW; }
       var w = (nmax - nmin + SIDE * 2) * scale;
       var ox = x - (nmin - SIDE) * scale;
-      BASE[L].forEach(function (c) {
-        chains.push(c.map(function (n) {
-          return [ox + n[0] * scale, n[1] * scale, Math.max(0.6, n[2] * scale * weight)];
+      all.forEach(function (ch, ci) {
+        var isBase = ci < cc.base.length;
+        (isBase ? chains : markChains).push(ch.map(function (n) {
+          var r = Math.max(0.6, n[2] * scale * weight), yy = n[1] * scale;
+          if (isBase) growBand(band, yy - r, yy + r);
+          return [ox + n[0] * scale, yy, r];
         }));
       });
       x += w + gap;
-    }
-    return { kind: 'chains', chains: chains, fallbackW: size * 0.6, fallbackH: size };
+    });
+    return {
+      kind: 'chains', chains: chains, markChains: markChains, fallbackW: size * 0.6, fallbackH: size,
+      missing: missing, band: band[0] < band[1] ? band : null,
+    };
   }
 
   // ------------------------------------------------------- uploaded fonts
@@ -247,28 +528,97 @@
   // (usually an empty path) for anything unmapped, so the row renders as
   // nothing with no error. Look each character up ourselves and retry
   // uppercased before giving up, the same fallback the built-in font documents.
+  function cmapIndex(font, ch) {
+    try { return font.charToGlyphIndex(ch) || 0; } catch (e) { return 0; }
+  }
   function glyphIndexFor(font, ch) {
-    var idx = font.charToGlyphIndex(ch);
+    var idx = cmapIndex(font, ch);
     if (idx) return idx;
-    var upper = ch.toUpperCase();
-    if (upper !== ch) idx = font.charToGlyphIndex(upper);
+    var upper = ch.toUpperCase().normalize('NFC');
+    if (upper !== ch && Array.from(upper).length === 1) idx = cmapIndex(font, upper);
     return idx || 0;
   }
+  function pathBox(path) {
+    try {
+      var b = path.getBoundingBox();
+      if (isFinite(b.x1) && isFinite(b.y1) && b.x2 >= b.x1 && b.y2 >= b.y1) return b;
+    } catch (e) { /* empty path */ }
+    return null;
+  }
+
+  // opentype.js has no mark positioning (no GPOS), so a letter the font lacks
+  // precomposed is rebuilt from its NFD base + combining-mark glyphs, each mark
+  // centred on the base's ink and nudged clear of it (and of the previous mark).
+  var MARK_ABOVE = /[\u0300-\u0315\u031A\u033D-\u0344\u0346\u034A-\u034C\u0350-\u0352\u0357\u035B\u0363-\u036F]/;
+  var MARK_BELOW = /[\u0316-\u0319\u031C-\u0333\u0339-\u033C\u0347-\u0349\u034D\u034E\u0353-\u0356\u0359\u035A]/;
+  var DECOMPOSE_EXTRA = { 'Đ': 'D\u0335', 'đ': 'd\u0335' };
+  function drawDecomposed(font, c, x, size, cmds, markCmds) {
+    var cps = Array.from(DECOMPOSE_EXTRA[c] || c.normalize('NFD'));
+    var bi = /^\p{M}/u.test(cps[0]) ? 0 : glyphIndexFor(font, cps[0]);
+    if (!bi) return { base: null, complete: false };
+    var bg = font.glyphs.get(bi);
+    var bp = bg.getPath(x, 0, size);
+    Array.prototype.push.apply(cmds, bp.commands);
+    var bb = pathBox(bp);
+    var adv = (bg.advanceWidth || font.unitsPerEm * 0.55) * size / font.unitsPerEm;
+    var x1 = bb ? bb.x1 : x, x2 = bb ? bb.x2 : x + adv;
+    var top = bb ? bb.y1 : -size * 0.7, bottom = bb ? bb.y2 : 0;
+    var cx = (x1 + x2) / 2, gap = size * 0.05, complete = true;
+    cps.slice(1).forEach(function (m) {
+      var mi = cmapIndex(font, m);
+      if (!mi) { complete = false; return; }
+      var mg = font.glyphs.get(mi);
+      var mb = pathBox(mg.getPath(0, 0, size));
+      if (!mb) return;
+      var mcx = (mb.x1 + mb.x2) / 2, dx, dy;
+      if (MARK_ABOVE.test(m)) {
+        dx = cx - mcx;
+        dy = Math.min(0, (top - gap) - mb.y2);     // lift only if it would cut in
+        top = Math.min(top, mb.y1 + dy);
+      } else if (MARK_BELOW.test(m)) {
+        dx = cx - mcx;
+        dy = Math.max(0, (bottom + gap) - mb.y1);
+        bottom = Math.max(bottom, mb.y2 + dy);
+      } else if (m === '\u031B') {                  // horn: hooks onto the top right
+        dx = x2 - mb.x1 - size * 0.06;
+        dy = (bb ? bb.y1 : top) - size * 0.04 - mb.y1;
+      } else if (m === '\u0335') {                  // short stroke: across the stem
+        dx = x1 + (x2 - x1) * 0.3 - mcx;
+        dy = (bb ? (bb.y1 + bb.y2) / 2 : -size * 0.35) - (mb.y1 + mb.y2) / 2;
+      } else {                                      // other overlays: centred, as drawn
+        dx = cx - mcx; dy = 0;
+      }
+      Array.prototype.push.apply(markCmds, mg.getPath(dx, dy, size).commands);
+    });
+    return { base: bg, complete: complete };
+  }
+
   function uploadRowGeom(font, text, size, trackingPx) {
     var scale = size / font.unitsPerEm;
-    var cmds = [];
-    var x = 0, drawn = 0;
-    for (var i = 0; i < text.length; i++) {
-      var ch = text[i];
-      if (/\s/.test(ch)) { x += font.unitsPerEm * 0.28 * scale + trackingPx; continue; }
-      var gi = glyphIndexFor(font, ch);
-      var g = font.glyphs.get(gi);
-      if (gi) { cmds = cmds.concat(g.getPath(x, 0, size).commands); drawn++; }
+    var cmds = [], markCmds = [], missing = [];
+    var x = 0, drawn = 0, total = 0;
+    // whole code point clusters, never UTF-16 halves or detached marks
+    var units = String(text).normalize('NFC').match(/\P{M}\p{M}*|\p{M}+/gu) || [];
+    units.forEach(function (c) {
+      if (isSpace(c)) { x += font.unitsPerEm * 0.28 * scale + trackingPx; return; }
+      total++;
+      var gi = Array.from(c).length === 1 ? glyphIndexFor(font, c) : 0;
+      var g;
+      if (gi) {
+        g = font.glyphs.get(gi);
+        Array.prototype.push.apply(cmds, g.getPath(x, 0, size).commands);
+        drawn++;
+      } else {
+        var d = drawDecomposed(font, c, x, size, cmds, markCmds);
+        g = d.base || font.glyphs.get(0);
+        if (d.base) drawn++;
+        if (!d.complete) missing.push(c);
+      }
       x += (g.advanceWidth || font.unitsPerEm * 0.55) * scale + trackingPx;
-    }
+    });
     return {
-      kind: 'path', cmds: cmds, fallbackW: Math.max(x, size * 0.6), fallbackH: size,
-      empty: text.length > 0 && drawn === 0,
+      kind: 'path', cmds: cmds, markCmds: markCmds, fallbackW: Math.max(x, size * 0.6), fallbackH: size,
+      empty: total > 0 && drawn === 0, missing: missing, band: null,
     };
   }
 
@@ -277,15 +627,15 @@
   function shearGeom(geom, tan, pivotY) {
     if (!tan) return;
     if (geom.kind === 'polys') {
-      geom.polys.forEach(function (poly) {
+      geom.polys.concat(geom.markPolys || []).forEach(function (poly) {
         poly.forEach(function (p) { p[0] -= tan * (p[1] - pivotY); });
       });
     } else if (geom.kind === 'chains') {
-      geom.chains.forEach(function (ch) {
+      geom.chains.concat(geom.markChains || []).forEach(function (ch) {
         ch.forEach(function (n) { n[0] -= tan * (n[1] - pivotY); });
       });
     } else {
-      geom.cmds.forEach(function (c) {
+      geom.cmds.concat(geom.markCmds || []).forEach(function (c) {
         if (c.x != null) c.x -= tan * (c.y - pivotY);
         if (c.x1 != null) c.x1 -= tan * (c.y1 - pivotY);
         if (c.x2 != null) c.x2 -= tan * (c.y2 - pivotY);
@@ -296,17 +646,17 @@
   function geomBBox(geom) {
     var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     if (geom.kind === 'polys') {
-      geom.polys.forEach(function (r) { r.forEach(function (p) {
+      geom.polys.concat(geom.markPolys || []).forEach(function (r) { r.forEach(function (p) {
         if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
         if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
       }); });
     } else if (geom.kind === 'chains') {
-      geom.chains.forEach(function (ch) { ch.forEach(function (n) {
+      geom.chains.concat(geom.markChains || []).forEach(function (ch) { ch.forEach(function (n) {
         if (n[0] - n[2] < x0) x0 = n[0] - n[2]; if (n[0] + n[2] > x1) x1 = n[0] + n[2];
         if (n[1] - n[2] < y0) y0 = n[1] - n[2]; if (n[1] + n[2] > y1) y1 = n[1] + n[2];
       }); });
     } else {
-      var p = new opentype.Path(); p.commands = geom.cmds;
+      var p = new opentype.Path(); p.commands = geom.cmds.concat(geom.markCmds || []);
       try {
         var bb = p.getBoundingBox();
         x0 = bb.x1; y0 = bb.y1; x1 = bb.x2; y1 = bb.y2;
@@ -343,6 +693,31 @@
     }
   }
 
+  // Floating accents are kept apart from the letters' geometry: the row's
+  // Merge blur would otherwise erase them from a small row (they are the
+  // thinnest, most isolated ink there) or bridge them into their letter
+  // across a gap narrower than the blur. computeContour draws them after the
+  // blur instead, so they reach the threshold crisp and always separate.
+  function drawMarks(geom, ctx) {
+    ctx.beginPath();
+    if (geom.kind === 'polys') {
+      (geom.markPolys || []).forEach(function (r) {
+        if (!r.length) return;
+        ctx.moveTo(r[0][0], r[0][1]);
+        for (var i = 1; i < r.length; i++) ctx.lineTo(r[i][0], r[i][1]);
+        ctx.closePath();
+      });
+    } else if (geom.kind === 'chains') {
+      (geom.markChains || []).forEach(function (ch) { strokeChain(ctx, ch); });
+    } else {
+      pathCmds(ctx, geom.markCmds || []);   // an uploaded font's fallback marks
+    }
+    ctx.fill();
+  }
+  function hasMarks(geom) {
+    return ['markPolys', 'markChains', 'markCmds'].some(function (k) { return geom[k] && geom[k].length; });
+  }
+
   function drawGeom(geom, ctx) {
     ctx.beginPath();
     if (geom.kind === 'polys') {
@@ -355,15 +730,18 @@
     } else if (geom.kind === 'chains') {
       geom.chains.forEach(function (ch) { strokeChain(ctx, ch); });
     } else {
-      geom.cmds.forEach(function (c) {
-        if (c.type === 'M') ctx.moveTo(c.x, c.y);
-        else if (c.type === 'L') ctx.lineTo(c.x, c.y);
-        else if (c.type === 'C') ctx.bezierCurveTo(c.x1, c.y1, c.x2, c.y2, c.x, c.y);
-        else if (c.type === 'Q') ctx.quadraticCurveTo(c.x1, c.y1, c.x, c.y);
-        else if (c.type === 'Z') ctx.closePath();
-      });
+      pathCmds(ctx, geom.cmds);
     }
     ctx.fill();
+  }
+  function pathCmds(ctx, cmds) {
+    cmds.forEach(function (c) {
+      if (c.type === 'M') ctx.moveTo(c.x, c.y);
+      else if (c.type === 'L') ctx.lineTo(c.x, c.y);
+      else if (c.type === 'C') ctx.bezierCurveTo(c.x1, c.y1, c.x2, c.y2, c.x, c.y);
+      else if (c.type === 'Q') ctx.quadraticCurveTo(c.x1, c.y1, c.x, c.y);
+      else if (c.type === 'Z') ctx.closePath();
+    });
   }
 
   // The connector: an undulating, variable-width stroke running along the
@@ -393,6 +771,7 @@
   // Layouts are pure functions of their inputs, so cache them — dragging a row
   // around must not re-tessellate its glyphs.
   var layoutCache = {};
+  var uploadVer = 0;      // bumped per uploaded file (two files can share a name)
   function rowLayout(row) {
     var text = (row.text || '').trim();
     if (!text) return null;
@@ -400,7 +779,7 @@
     var slant = ink ? row.slant : 0;
     var flow = ink ? row.flow * (row.size / 180) : 0;
     var weight = ink ? row.weight : 1;
-    var srcKey = state.fontSource === 'upload' ? 'u:' + state.uploadedFontName : 'b:' + glyphKey();
+    var srcKey = state.fontSource === 'upload' ? 'u:' + uploadVer : 'b:' + glyphKey();
     var key = [srcKey, text, row.size, row.tracking, slant, flow, weight, ink, state.seed].join('|');
     if (layoutCache[key]) return layoutCache[key];
 
@@ -409,11 +788,6 @@
       if (!state.uploadedFont) return null;
       try { geom = uploadRowGeom(state.uploadedFont, text, row.size, row.tracking * row.size); }
       catch (e) { console.error('upload layout failed', e); return null; }
-      // Fires only on genuinely new (text, font) combos — this branch is
-      // skipped entirely on a cache hit, so it can't spam on every slider drag.
-      if (geom.empty) {
-        toast('"' + text + '" has no matching glyphs in ' + state.uploadedFontName + ' (even uppercased)', 3800);
-      }
     } else {
       geom = ink ? builtinInkGeom(text, row.size, row.tracking, weight)
                  : builtinRowGeom(text, row.size, row.tracking);
@@ -424,7 +798,9 @@
       shearGeom(geom, Math.tan(slant * Math.PI / 180), bbox[3]);
       bbox = geomBBox(geom);
     }
-    var ribbon = makeRibbon(bbox, flow, state.seed + 3);
+    // The ribbon rides the letters' own band, so accents don't lift it.
+    var band = geom.band;
+    var ribbon = makeRibbon(band ? [bbox[0], band[0], bbox[2], band[1]] : bbox, flow, state.seed + 3);
     if (ribbon.length) {
       // the ribbon can bulge past the glyphs, so re-measure with it included
       ribbon.forEach(function (p) {
@@ -434,16 +810,35 @@
         if (p[1] + p[2] > bbox[3]) bbox[3] = p[1] + p[2];
       });
     }
+    // A row is placed by its box centre. Anchor that on the middle of the cap
+    // band and grow the box symmetrically to take the accents (stacked marks
+    // reach ~0.3 em above the caps, a dot below ~0.15 em under the baseline):
+    // typing an accent then never makes the row jump, and the selection box
+    // and hit area always contain every mark.
+    if (band) {
+      var mid = (band[0] + band[1]) / 2;
+      var top = Math.min(bbox[1], 2 * mid - bbox[3]);
+      var bot = Math.max(bbox[3], 2 * mid - bbox[1]);
+      bbox = [bbox[0], top, bbox[2], bot];
+    }
 
     var out = {
       bbox: bbox,
-      draw: function (ctx) {
-        drawGeom(geom, ctx);
-        if (!ribbon.length) return;
-        ctx.beginPath();
-        strokeChain(ctx, ribbon);
-        ctx.fill();
+      missing: geom.missing || [],
+      empty: !!geom.empty,
+      // part: 'base' (letters + ribbon), 'marks' (floating accents) or all
+      draw: function (ctx, part) {
+        if (part !== 'marks') {
+          drawGeom(geom, ctx);
+          if (ribbon.length) {
+            ctx.beginPath();
+            strokeChain(ctx, ribbon);
+            ctx.fill();
+          }
+        }
+        if (part !== 'base') drawMarks(geom, ctx);
       },
+      hasMarks: hasMarks(geom),
     };
     if (Object.keys(layoutCache).length > 120) layoutCache = {};
     layoutCache[key] = out;
@@ -454,11 +849,43 @@
   // a freshly added row never lands overflowing the poster.
   function autoFitRowSize(row, frac) {
     var REF = 100;
-    var lay = rowLayout({ text: row.text, size: REF, tracking: row.tracking });
+    var lay = rowLayout({
+      text: row.text, size: REF, tracking: row.tracking,
+      style: row.style, flow: row.flow, slant: row.slant, weight: row.weight,
+    });
     if (!lay) return;
     var w = lay.bbox[2] - lay.bbox[0];
     if (!(w > 0)) return;
     row.size = Math.round(Math.max(20, Math.min(500, REF * (frac * state.canvasW) / w)));
+  }
+
+  // Clusters the current typeface could not draw, across every row: toasted
+  // once whenever that set changes, rather than on every keystroke or drag.
+  var lastMissing = '';
+  function showCluster(c) {
+    if (/^\p{M}/u.test(c)) return '\u25CC' + c;           // lone mark: show it on a dotted circle
+    if (/\p{C}/u.test(c)) return 'U+' + c.codePointAt(0).toString(16).toUpperCase();
+    return c;
+  }
+  function reportMissing() {
+    var seen = {}, list = [], emptyRow = null;
+    state.bigRows.forEach(function (row) {
+      var lay = rowLayout(row);
+      if (!lay) return;
+      if (lay.empty && !emptyRow) emptyRow = row;
+      lay.missing.forEach(function (c) { if (!seen[c]) { seen[c] = 1; list.push(c); } });
+    });
+    var upload = state.fontSource === 'upload';
+    var sig = (upload ? 'u' + uploadVer : 'b' + srcVer) + '|' + (emptyRow ? emptyRow.id : '') + '|' + list.join('\u0000');
+    if (sig === lastMissing) return;
+    lastMissing = sig;
+    if (emptyRow) {
+      toast('"' + emptyRow.text.trim() + '" has no matching glyphs in ' + state.uploadedFontName + ' (even uppercased)', 3800);
+      return;
+    }
+    if (!list.length) return;
+    var shown = list.slice(0, 14).map(showCluster).join(' ') + (list.length > 14 ? ' \u2026' : '');
+    toast('Not in ' + (upload ? state.uploadedFontName || 'the uploaded font' : 'the built-in set') + ': ' + shown, 3600);
   }
 
   // Each row placed so its ink bbox centre lands on the row's (xp,yp) point.
@@ -624,19 +1051,22 @@
     return [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad];
   }
 
-  function rasterizeRow(rl, bounds, maskDpr) {
-    var x0 = bounds[0], y0 = bounds[1];
-    var pw = Math.max(1, Math.round((bounds[2] - x0) * maskDpr));
-    var ph = Math.max(1, Math.round((bounds[3] - y0) * maskDpr));
+  // Mask pixel space -> the row's own layout space.
+  function rowMaskTransform(ctx, rl, bounds, maskDpr) {
+    ctx.setTransform(maskDpr, 0, 0, maskDpr, 0, 0);
+    ctx.translate(-bounds[0], -bounds[1]);
+    ctx.translate(rl.px, rl.py);
+    if (rl.row.rot) ctx.rotate(rl.row.rot * Math.PI / 180);
+    ctx.translate(-rl.cx, -rl.cy);
+    ctx.fillStyle = '#000';
+  }
+  function rasterizeRow(rl, bounds, maskDpr, part) {
+    var pw = Math.max(1, Math.round((bounds[2] - bounds[0]) * maskDpr));
+    var ph = Math.max(1, Math.round((bounds[3] - bounds[1]) * maskDpr));
     var mask = document.createElement('canvas'); mask.width = pw; mask.height = ph;
     var mctx = mask.getContext('2d');
-    mctx.setTransform(maskDpr, 0, 0, maskDpr, 0, 0);
-    mctx.translate(-x0, -y0);
-    mctx.fillStyle = '#000';
-    mctx.translate(rl.px, rl.py);
-    if (rl.row.rot) mctx.rotate(rl.row.rot * Math.PI / 180);
-    mctx.translate(-rl.cx, -rl.cy);
-    rl.layout.draw(mctx);
+    rowMaskTransform(mctx, rl, bounds, maskDpr);
+    rl.layout.draw(mctx, part);
     return { canvas: mask, w: pw, h: ph };
   }
 
@@ -656,13 +1086,20 @@
         maskDpr = MAXPIX / Math.max(bw, bh);
       }
 
-      var mask = rasterizeRow(rl, bounds, maskDpr);
+      var blur = state.melt > 0;
+      var mask = rasterizeRow(rl, bounds, maskDpr, blur ? 'base' : undefined);
       var src = mask.canvas;
-      if (state.melt > 0) {
+      if (blur) {
         var bc = document.createElement('canvas'); bc.width = mask.w; bc.height = mask.h;
         var bctx = bc.getContext('2d');
         bctx.filter = 'blur(' + (state.melt * maskDpr) + 'px)';
         bctx.drawImage(mask.canvas, 0, 0);
+        bctx.filter = 'none';
+        // accents skip the blur (see drawMarks)
+        if (rl.layout.hasMarks) {
+          rowMaskTransform(bctx, rl, bounds, maskDpr);
+          rl.layout.draw(bctx, 'marks');
+        }
         src = bc;
       }
       var img = src.getContext('2d').getImageData(0, 0, mask.w, mask.h).data;
@@ -828,7 +1265,8 @@
     drawSmallBlocks(ctx);
     paintOverlay();
     $('stageMeta').textContent = W + ' × ' + H + ' px — ' +
-      (state.fontSource === 'upload' ? (state.uploadedFontName || 'no font uploaded') : 'Liquid (built-in)');
+      (state.fontSource === 'upload' ? (state.uploadedFontName || 'no font uploaded')
+        : linked() ? 'Font-tool glyphs' + (project.fontName ? ' (' + project.fontName + ')' : '') : 'Liquid (built-in)');
   }
 
   // Rough, instant stand-in used while dragging: the raw silhouettes with no
@@ -934,20 +1372,27 @@
         catch (e) { console.error(e); cachedContour = null; }
         paint(cachedContour);
         $('stageLoading').classList.remove('show');
+        reportMissing();
       }, 0);
     }, 130);
   }
 
   // ---------------------------------------------------------------- sidebar
-  function sliderRow(label, min, max, step, value, fmt, onInput) {
+  // `name` is the accessible name (the visible label is often a terse
+  // abbreviation like "Track"), e.g. "Row 1 tracking".
+  function sliderRow(label, min, max, step, value, fmt, onInput, name) {
     var wrap = mk('div', 'mini-slider');
-    wrap.appendChild(mk('span', null, label));
+    wrap.appendChild(mk('span', null, label)).setAttribute('aria-hidden', 'true');
     var inp = document.createElement('input');
     inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = value;
+    inp.setAttribute('aria-label', name || label);
+    inp.setAttribute('aria-valuetext', String(fmt(value)));
     var val = mk('b', null, fmt(value));
+    val.setAttribute('aria-hidden', 'true');
     inp.addEventListener('input', function () {
       var v = parseFloat(inp.value);
       val.textContent = fmt(v);
+      inp.setAttribute('aria-valuetext', String(fmt(v)));
       onInput(v);
     });
     wrap.appendChild(inp); wrap.appendChild(val);
@@ -955,15 +1400,26 @@
     return wrap;
   }
 
-  function segRow(options, current, onPick) {
+  // options: [value, label, tooltip?, accessible name?]. Real toggle buttons,
+  // so they are tabbable and announce which one is on.
+  function segRow(options, current, onPick, groupName, fkPrefix) {
     var row = mk('div', 'seg-row');
+    row.setAttribute('role', 'group');
+    if (groupName) row.setAttribute('aria-label', groupName);
     options.forEach(function (o) {
-      var btn = mk('div', 'pill-btn' + (current === o[0] ? ' active' : ''), o[1]);
+      var on = current === o[0];
+      var btn = mk('button', 'pill-btn' + (on ? ' active' : ''), o[1]);
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       if (o[2]) btn.title = o[2];
+      if (o[3]) btn.setAttribute('aria-label', o[3]);
+      if (fkPrefix) btn.dataset.fk = fkPrefix + o[0];
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        row.querySelectorAll('.pill-btn').forEach(function (x) { x.classList.remove('active'); });
-        btn.classList.add('active');
+        row.querySelectorAll('.pill-btn').forEach(function (x) {
+          x.classList.remove('active'); x.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true');
         onPick(o[0]);
       });
       row.appendChild(btn);
@@ -1010,47 +1466,74 @@
     }
   }
 
+  // Cards are rebuilt wholesale on structural changes (style, effect, order,
+  // palette), which would drop keyboard focus on the floor. Every focusable
+  // control carries a stable data-fk key, and keepFocus puts focus back on the
+  // rebuilt control with the same key.
+  function keepFocus(fn) {
+    var a = document.activeElement;
+    var key = a && a.dataset ? a.dataset.fk : null;
+    fn();
+    if (!key) return;
+    var el = document.querySelector('[data-fk="' + key + '"]');
+    if (el && el !== document.activeElement && !el.disabled) el.focus({ preventScroll: true });
+  }
+  function fk(el, key) { el.dataset.fk = key; return el; }
+
   function renderBigRowCards() {
     var list = $('bigRowList');
     list.innerHTML = '';
     state.bigRows.forEach(function (row, idx) {
       var selected = state.selected && state.selected.type === 'row' && state.selected.id === row.id;
       var card = mk('div', 'item-card' + (selected ? ' selected' : ''));
+      var name = 'Row ' + (idx + 1), pre = 'row-' + row.id + '-';
       card._id = row.id;
+      card.setAttribute('role', 'group');
+      card.setAttribute('aria-label', 'Title ' + name.toLowerCase());
       card.addEventListener('mousedown', function () { select('row', row.id); });
+      // tabbing into a collapsed card opens it, like clicking it does
+      card.addEventListener('focusin', function () { select('row', row.id); });
 
-      var head = cardHead('Row ' + (idx + 1), rowMetaText(row));
+      var head = cardHead(name, rowMetaText(row));
       card._meta = head._meta;
-      var up = mk('button', 'icon-btn', '\u2191'); up.title = 'Move up';
+      var up = fk(mk('button', 'icon-btn', '\u2191'), pre + 'up');
+      up.type = 'button'; up.title = 'Move up';
+      up.setAttribute('aria-label', 'Move ' + name.toLowerCase() + ' up');
       up.disabled = idx === 0;
       up.addEventListener('click', function (e) {
         e.stopPropagation(); moveItem(state.bigRows, idx, -1);
-        renderBigRowCards(); scheduleRender(true);
+        keepFocus(renderBigRowCards); scheduleRender(true);
       });
-      var del = mk('button', 'icon-btn danger', '\u00d7'); del.title = 'Delete row';
+      var del = fk(mk('button', 'icon-btn danger', '\u00d7'), pre + 'del');
+      del.type = 'button'; del.title = 'Delete row';
+      del.setAttribute('aria-label', 'Delete ' + name.toLowerCase());
       del.disabled = state.bigRows.length <= 1;
       del.addEventListener('click', function (e) {
         e.stopPropagation();
         state.bigRows.splice(idx, 1);
         if (state.selected && state.selected.id === row.id) state.selected = null;
         renderBigRowCards(); scheduleRender(true);
+        $('btnAddBigRow').focus({ preventScroll: true });
       });
       head.appendChild(up); head.appendChild(del);
       card.appendChild(head);
 
-      var txt = document.createElement('input');
+      var txt = fk(document.createElement('input'), pre + 'text');
       txt.className = 'ptext compact'; txt.value = row.text; txt.spellcheck = false;
-      txt.setAttribute('aria-label', 'Row ' + (idx + 1) + ' text');
+      txt.setAttribute('aria-label', name + ' text');
       txt.addEventListener('input', function () { row.text = txt.value; scheduleRender(true); });
       card.appendChild(txt);
 
       var body = mk('div', 'item-card-body');
-      body.appendChild(sliderRow('Track', -0.06, 0.5, 0.005, row.tracking,
+      var s;
+      s = sliderRow('Track', -0.06, 0.5, 0.005, row.tracking,
         function (v) { return v.toFixed(3); },
-        function (v) { row.tracking = v; scheduleRender(true); }));
+        function (v) { row.tracking = v; scheduleRender(true); }, name + ' tracking');
+      fk(s._input, pre + 'track'); body.appendChild(s);
       var turn = sliderRow('Turn', -180, 180, 1, row.rot,
         function (v) { return Math.round(v) + '\u00b0'; },
-        function (v) { row.rot = v; updateCardMeta(); scheduleRender(true); });
+        function (v) { row.rot = v; updateCardMeta(); scheduleRender(true); }, name + ' rotation');
+      fk(turn._input, pre + 'turn');
       card._turn = turn;
       body.appendChild(turn);
 
@@ -1059,24 +1542,28 @@
         ['ink', 'Ink stroke', TITLE_STYLE_HINTS.ink],
       ], row.style, function (v) {
         row.style = v;
-        renderBigRowCards();
+        keepFocus(renderBigRowCards);
         scheduleRender(true);
-      }));
+      }, name + ' title style', pre + 'style-'));
 
       if (row.style === 'ink') {
         body.appendChild(mk('p', 'phint', TITLE_STYLE_HINTS.ink));
-        body.appendChild(sliderRow('Flow', 0, 46, 1, row.flow,
+        s = sliderRow('Flow', 0, 46, 1, row.flow,
           function (v) { return Math.round(v) + 'px'; },
-          function (v) { row.flow = v; scheduleRender(true); }));
-        body.appendChild(sliderRow('Slant', -25, 25, 0.5, row.slant,
+          function (v) { row.flow = v; scheduleRender(true); }, name + ' ribbon flow');
+        fk(s._input, pre + 'flow'); body.appendChild(s);
+        s = sliderRow('Slant', -25, 25, 0.5, row.slant,
           function (v) { return v.toFixed(1) + '\u00b0'; },
-          function (v) { row.slant = v; scheduleRender(true); }));
-        body.appendChild(sliderRow('Pen', 0.15, 1.4, 0.01, row.weight,
+          function (v) { row.slant = v; scheduleRender(true); }, name + ' slant');
+        fk(s._input, pre + 'slant'); body.appendChild(s);
+        s = sliderRow('Pen', 0.15, 1.4, 0.01, row.weight,
           function (v) { return v.toFixed(2) + '\u00d7'; },
-          function (v) { row.weight = v; scheduleRender(true); }));
-        body.appendChild(sliderRow('Pocket', 0, 0.14, 0.002, row.pocket,
+          function (v) { row.weight = v; scheduleRender(true); }, name + ' pen thickness');
+        fk(s._input, pre + 'pen'); body.appendChild(s);
+        s = sliderRow('Pocket', 0, 0.14, 0.002, row.pocket,
           function (v) { return (v * 100).toFixed(1) + '%'; },
-          function (v) { row.pocket = v; scheduleRender(false); }));
+          function (v) { row.pocket = v; scheduleRender(false); }, name + ' pocket fill');
+        fk(s._input, pre + 'pocket'); body.appendChild(s);
       }
 
       body.appendChild(mk('div', 'field-label', 'Line effect'));
@@ -1085,31 +1572,35 @@
         ['rough', 'Rough', EFFECT_HINTS.rough],
         ['contour', 'Contour', EFFECT_HINTS.contour],
       ], row.effect, function (v) {
-        row.effect = v; renderBigRowCards(); scheduleRender(true);
-      }));
+        row.effect = v; keepFocus(renderBigRowCards); scheduleRender(true);
+      }, name + ' line effect', pre + 'effect-'));
       body.appendChild(mk('p', 'phint', EFFECT_HINTS[row.effect]));
 
       if (row.effect === 'rough') {
-        body.appendChild(sliderRow('Gap', 1, 20, 0.5, row.gap,
+        s = sliderRow('Gap', 1, 20, 0.5, row.gap,
           function (v) { return v.toFixed(1) + 'px'; },
-          function (v) { row.gap = v; scheduleRender(true); }));
-        body.appendChild(sliderRow('Shake', 0, 10, 0.1, row.jitter,
+          function (v) { row.gap = v; scheduleRender(true); }, name + ' rough gap');
+        fk(s._input, pre + 'gap'); body.appendChild(s);
+        s = sliderRow('Shake', 0, 10, 0.1, row.jitter,
           function (v) { return v.toFixed(1); },
-          function (v) { row.jitter = v; scheduleRender(true); }));
+          function (v) { row.jitter = v; scheduleRender(true); }, name + ' rough shake');
+        fk(s._input, pre + 'shake'); body.appendChild(s);
       } else if (row.effect === 'contour') {
-        body.appendChild(sliderRow('Lines', 2, 14, 1, row.lines,
+        s = sliderRow('Lines', 2, 14, 1, row.lines,
           function (v) { return Math.round(v); },
-          function (v) { row.lines = Math.round(v); scheduleRender(true); }));
-        body.appendChild(sliderRow('Step', 3, 40, 0.5, row.spacing,
+          function (v) { row.lines = Math.round(v); scheduleRender(true); }, name + ' contour lines');
+        fk(s._input, pre + 'lines'); body.appendChild(s);
+        s = sliderRow('Step', 3, 40, 0.5, row.spacing,
           function (v) { return v.toFixed(1) + 'px'; },
-          function (v) { row.spacing = v; scheduleRender(true); }));
+          function (v) { row.spacing = v; scheduleRender(true); }, name + ' contour step');
+        fk(s._input, pre + 'step'); body.appendChild(s);
       }
 
       body.appendChild(segRow([
         ['outline', 'Outline'], ['filled', 'Filled'],
       ], row.mode, function (v) {
         row.mode = v; updateCardMeta(); scheduleRender(false);
-      }));
+      }, name + ' fill mode', pre + 'mode-'));
 
       card.appendChild(body);
       list.appendChild(card);
@@ -1122,24 +1613,31 @@
     state.smallBlocks.forEach(function (b, idx) {
       var selected = state.selected && state.selected.type === 'block' && state.selected.id === b.id;
       var card = mk('div', 'item-card' + (selected ? ' selected' : ''));
+      var name = 'Text ' + (idx + 1), pre = 'block-' + b.id + '-';
       card._id = b.id;
+      card.setAttribute('role', 'group');
+      card.setAttribute('aria-label', 'Small text block ' + (idx + 1));
       card.addEventListener('mousedown', function () { select('block', b.id); });
+      card.addEventListener('focusin', function () { select('block', b.id); });
 
       var firstLine = (b.text.split('\n')[0] || '').slice(0, 18);
-      var head = cardHead('Text ' + (idx + 1), firstLine);
-      var del = mk('button', 'icon-btn danger', '\u00d7'); del.title = 'Delete text block';
+      var head = cardHead(name, firstLine);
+      var del = fk(mk('button', 'icon-btn danger', '\u00d7'), pre + 'del');
+      del.type = 'button'; del.title = 'Delete text block';
+      del.setAttribute('aria-label', 'Delete small text block ' + (idx + 1));
       del.addEventListener('click', function (e) {
         e.stopPropagation();
         state.smallBlocks.splice(idx, 1);
         if (state.selected && state.selected.id === b.id) state.selected = null;
         renderSmallBlockCards(); scheduleRender(false);
+        $('btnAddSmallBlock').focus({ preventScroll: true });
       });
       head.appendChild(del);
       card.appendChild(head);
 
-      var ta = document.createElement('textarea');
+      var ta = fk(document.createElement('textarea'), pre + 'text');
       ta.className = 'ptextarea'; ta.value = b.text; ta.spellcheck = false;
-      ta.setAttribute('aria-label', 'Text block ' + (idx + 1));
+      ta.setAttribute('aria-label', 'Small text block ' + (idx + 1));
       ta.addEventListener('input', function () {
         b.text = ta.value;
         head._meta.textContent = (b.text.split('\n')[0] || '').slice(0, 18);
@@ -1149,9 +1647,9 @@
 
       var body = mk('div', 'item-card-body');
 
-      var sel = document.createElement('select');
+      var sel = fk(document.createElement('select'), pre + 'font');
       sel.className = 'pselect compact';
-      sel.setAttribute('aria-label', 'Font for text block ' + (idx + 1));
+      sel.setAttribute('aria-label', 'Font for small text block ' + (idx + 1));
       MONO_FONTS.forEach(function (f) {
         var o = document.createElement('option');
         o.value = f[0]; o.textContent = f[1];
@@ -1164,27 +1662,33 @@
       });
       body.appendChild(sel);
 
-      body.appendChild(segRow([['left', 'L'], ['center', 'C'], ['right', 'R']], b.align, function (v) {
+      body.appendChild(segRow([
+        ['left', 'L', null, 'Align left'], ['center', 'C', null, 'Align centre'], ['right', 'R', null, 'Align right'],
+      ], b.align, function (v) {
         b.align = v; scheduleRender(false);
-      }));
+      }, name + ' alignment', pre + 'align-'));
 
-      body.appendChild(sliderRow('Size', 6, 72, 1, b.size,
+      var s = sliderRow('Size', 6, 72, 1, b.size,
         function (v) { return Math.round(v) + 'px'; },
-        function (v) { b.size = v; scheduleRender(false); }));
-      body.appendChild(sliderRow('Lead', 90, 220, 1, b.lh,
+        function (v) { b.size = v; scheduleRender(false); }, name + ' size');
+      fk(s._input, pre + 'size'); body.appendChild(s);
+      s = sliderRow('Lead', 90, 220, 1, b.lh,
         function (v) { return Math.round(v) + '%'; },
-        function (v) { b.lh = v; scheduleRender(false); }));
+        function (v) { b.lh = v; scheduleRender(false); }, name + ' line spacing');
+      fk(s._input, pre + 'lead'); body.appendChild(s);
 
       // Small text carries its own colour so it can sit apart from the title ink.
       var colorRow = mk('div', 'prow prow-baseline');
       var pick = mk('label', 'swatch-pick');
-      var ci = document.createElement('input');
+      var ci = fk(document.createElement('input'), pre + 'color');
       ci.type = 'color'; ci.value = b.color || state.ink;
+      ci.setAttribute('aria-label', name + ' colour');
       ci.addEventListener('input', function () { b.color = ci.value; scheduleRender(false); });
-      pick.appendChild(ci); pick.appendChild(mk('span', null, 'Colour'));
+      pick.appendChild(ci); pick.appendChild(mk('span', null, 'Colour')).setAttribute('aria-hidden', 'true');
       colorRow.appendChild(pick);
       colorRow.appendChild(mk('div', 'spacer'));
-      var matchBtn = mk('button', 'mini-btn', 'Match ink');
+      var matchBtn = fk(mk('button', 'mini-btn', 'Match ink'), pre + 'match');
+      matchBtn.type = 'button';
       matchBtn.title = 'Reset to the title ink colour';
       matchBtn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -1204,18 +1708,33 @@
     var tmp = arr[idx]; arr[idx] = arr[j]; arr[j] = tmp;
   }
 
+  // Selection only opens/closes cards, so it toggles classes in place rather
+  // than rebuilding them: focus, the caret and a click in progress all survive.
+  function syncSelection() {
+    [['bigRowList', 'row'], ['smallBlockList', 'block']].forEach(function (cfg) {
+      Array.prototype.forEach.call($(cfg[0]).children, function (card) {
+        card.classList.toggle('selected', !!state.selected &&
+          state.selected.type === cfg[1] && state.selected.id === card._id);
+      });
+    });
+  }
   function select(type, id) {
-    if (state.selected && state.selected.type === type && state.selected.id === id) return;
+    if (state.selected && state.selected.type === type && state.selected.id === id) return false;
     state.selected = { type: type, id: id };
-    renderBigRowCards(); renderSmallBlockCards();
+    syncSelection();
     paintOverlay();
+    return true;
   }
 
   // ---------------------------------------------------------------- palette
   function renderPalette() {
     var pairs = $('pairPalette'); pairs.innerHTML = '';
     PAIRS.forEach(function (p) {
-      var btn = mk('button', 'pair-btn' + (p.ink === state.ink && p.bg === state.bg ? ' active' : ''));
+      var on = p.ink === state.ink && p.bg === state.bg;
+      var btn = fk(mk('button', 'pair-btn' + (on ? ' active' : '')), 'pair-' + p.name);
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.setAttribute('aria-label', p.name + ' colour pair');
       var chip = mk('div', 'pair-chip'); chip.style.background = p.bg;
       var s = mk('span', null, 'Aa'); s.style.color = p.ink;
       chip.appendChild(s);
@@ -1225,7 +1744,7 @@
         state.ink = p.ink; state.bg = p.bg; state.bgTransparent = false;
         $('inkColor').value = p.ink; $('bgColor').value = p.bg;
         $('bgTransparent').checked = false;
-        renderPalette(); scheduleRender(false);
+        keepFocus(renderPalette); scheduleRender(false);
       });
       pairs.appendChild(btn);
     });
@@ -1235,13 +1754,17 @@
       host.innerHTML = '';
       RAMPS.forEach(function (ramp) {
         ramp.forEach(function (c) {
-          var sw = mk('button', 'sw' + (state[key].toLowerCase() === c ? ' active' : ''));
+          var on = state[key].toLowerCase() === c;
+          var sw = fk(mk('button', 'sw' + (on ? ' active' : '')), key + '-' + c.slice(1));
+          sw.type = 'button';
           sw.style.background = c; sw.title = c;
+          sw.setAttribute('aria-label', (key === 'ink' ? 'Title ink ' : 'Background ') + c);
+          sw.setAttribute('aria-pressed', on ? 'true' : 'false');
           sw.addEventListener('click', function () {
             state[key] = c;
             $(key === 'ink' ? 'inkColor' : 'bgColor').value = c;
             if (key === 'bg') { state.bgTransparent = false; $('bgTransparent').checked = false; }
-            renderPalette(); scheduleRender(false);
+            keepFocus(renderPalette); scheduleRender(false);
           });
           host.appendChild(sw);
         });
@@ -1348,7 +1871,7 @@
       var hit = hitTest(p);
       if (!hit) {
         state.selected = null;
-        renderBigRowCards(); renderSmallBlockCards(); paintOverlay();
+        syncSelection(); paintOverlay();
         pan = { x: ev.clientX, y: ev.clientY, sl: scroll.scrollLeft, st: scroll.scrollTop };
         scroll.classList.add('panning');
         return;
@@ -1450,10 +1973,13 @@
     var row = $(rowId);
     var cells = row.querySelectorAll('.pill-btn');
     cells.forEach(function (btn) {
-      btn.classList.toggle('active', btn.dataset.value === get());
+      var on = btn.dataset.value === get();
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.addEventListener('click', function () {
-        cells.forEach(function (b) { b.classList.remove('active'); });
+        cells.forEach(function (b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
         set(btn.dataset.value);
         if (onChange) onChange();
         scheduleRender(heavy);
@@ -1473,6 +1999,94 @@
     $('glyphControls').hidden = isUpload;
   }
 
+  // ------------------------------------------------- built-in letter shape
+  var GLYPH_FIELDS = [
+    ['glyphMass', 'valGlyphMass', 'mass', function (v) { return v.toFixed(2); }],
+    ['glyphMelt', 'valGlyphMelt', 'melt', function (v) { return Math.round(v); }],
+    ['glyphTension', 'valGlyphTension', 'tension', function (v) { return v.toFixed(1); }],
+    ['glyphWobble', 'valGlyphWobble', 'wobble', function (v) { return v.toFixed(1); }],
+  ];
+  function syncGlyphSliders() {
+    GLYPH_FIELDS.forEach(function (f) {
+      $(f[0]).value = state.glyph[f[2]];
+      $(f[1]).textContent = f[3](state.glyph[f[2]]);
+    });
+    var sel = $('glyphPreset');
+    sel.value = hasOwn(presetTable(), state.glyph.preset) ? state.glyph.preset : 'custom';
+  }
+  function glyphChanged() {
+    // the letterforms themselves changed, so both caches are stale
+    builtinCache = {}; layoutCache = {};
+    scheduleRender(true);
+  }
+  // The user reshaping letters here means they no longer want the Font
+  // tool's shape mirrored: drop the match, but keep what they just set.
+  function unmatchShape() {
+    if (!(linked() && link.shape)) return;
+    link.shape = false; link.saved = null;
+    $('useProjectShape').checked = false;
+    updateProjectUI();
+  }
+
+  // Adopt (or give back) the project's flow state, seed-free shape values and
+  // accent spacing, depending on the two toggles.
+  function applyLinkShape() {
+    var on = linked() && link.shape;
+    if (on) {
+      if (!link.saved) link.saved = { glyph: copyObj(state.glyph), layout: GC ? copyObj(GC.LAYOUT) : null };
+      if (project.shape) {
+        Object.keys(project.shape).forEach(function (k) { state.glyph[k] = project.shape[k]; });
+        state.glyph.preset = project.preset;
+      }
+      if (GC) {
+        // start from stock spacing, so keys the project doesn't carry are not
+        // left over from an earlier project
+        Object.keys(DEFAULT_LAYOUT).forEach(function (k) { GC.LAYOUT[k] = DEFAULT_LAYOUT[k]; });
+        if (project.marks) Object.keys(project.marks).forEach(function (k) { GC.LAYOUT[k] = project.marks[k]; });
+      }
+    } else if (link.saved) {
+      state.glyph = copyObj(link.saved.glyph);
+      if (GC && link.saved.layout) Object.keys(link.saved.layout).forEach(function (k) { GC.LAYOUT[k] = link.saved.layout[k]; });
+      link.saved = null;
+    }
+    syncGlyphSliders();
+  }
+
+  var HINT_STOCK = 'Reshapes the letterforms themselves. Sculpt single letters and accents node-by-node in the ' +
+    '<a href="index.html">Font tool</a>: your edits appear here automatically (same browser).';
+  var HINT_LINKED = 'Drawing with the letters and accents from your <a href="index.html">Font tool</a> project. ' +
+    'Node edits there update this poster live; the sliders reshape every letter at once.';
+  function updateProjectUI() {
+    $('projectBox').hidden = !project;
+    $('useProject').checked = link.use;
+    $('useProjectShape').checked = link.shape;
+    $('useProjectShape').disabled = !link.use;
+    $('useProjectShape').parentNode.classList.toggle('is-disabled', !link.use);
+    // project data is untrusted: textContent only, never markup
+    var meta = '';
+    if (project) {
+      meta = (project.fontName ? '\u201c' + project.fontName + '\u201d \u00b7 ' : '') +
+        (project.edited ? project.edited + ' edited glyph' + (project.edited === 1 ? '' : 's')
+                        : 'no glyph edits yet') +
+        (link.use ? '' : ' \u00b7 not in use');
+    }
+    $('projectMeta').textContent = meta;
+    $('glyphHint').innerHTML = linked() ? HINT_LINKED : HINT_STOCK;
+  }
+
+  // Pick up the Font tool's latest autosave. `force` re-applies even when the
+  // stored string hasn't changed (used at boot).
+  function refreshProject(force) {
+    var had = !!project;
+    if (!readProject() && !force) return;
+    if (project && !had) link.use = true;      // default ON whenever a project appears
+    srcVer++;
+    builtinCache = {}; layoutCache = {};
+    applyLinkShape();
+    updateProjectUI();
+    if (!force) scheduleRender(true);
+  }
+
   function applyCanvasSize(w, h) {
     state.canvasW = w; state.canvasH = h;
     layoutCache = {};
@@ -1485,8 +2099,9 @@
       function (v) { state.fontSource = v; layoutCache = {}; }, true, updateFontSourceUI);
     updateFontSourceUI();
 
+    // The dropzone is a <label for=fontFileInput>: the browser opens the picker
+    // on click, and the (visually hidden) input itself takes keyboard focus.
     var dropzone = $('fontDropzone'), fileInput = $('fontFileInput');
-    dropzone.addEventListener('click', function () { fileInput.click(); });
     dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; });
     dropzone.addEventListener('dragleave', function () { if (!state.uploadedFont) dropzone.style.borderColor = ''; });
     dropzone.addEventListener('drop', function (e) {
@@ -1494,7 +2109,6 @@
       if (e.dataTransfer.files[0]) loadFontFile(e.dataTransfer.files[0]);
     });
     fileInput.addEventListener('change', function (e) { if (e.target.files[0]) loadFontFile(e.target.files[0]); });
-    fileInput.addEventListener('click', function (e) { e.stopPropagation(); });
 
     function loadFontFile(file) {
       var reader = new FileReader();
@@ -1502,6 +2116,7 @@
         try {
           var font = opentype.parse(e.target.result);
           state.uploadedFont = font; state.uploadedFontName = file.name;
+          uploadVer++;
           layoutCache = {};
           $('fontDropLabel').textContent = 'Loaded: ' + file.name + ' — click to replace.';
           dropzone.classList.add('has-font');
@@ -1517,34 +2132,22 @@
     }
 
     // -- built-in letterform shape
-    var GLYPH_FIELDS = [
-      ['glyphMass', 'valGlyphMass', 'mass', function (v) { return v.toFixed(2); }],
-      ['glyphMelt', 'valGlyphMelt', 'melt', function (v) { return Math.round(v); }],
-      ['glyphTension', 'valGlyphTension', 'tension', function (v) { return v.toFixed(1); }],
-      ['glyphWobble', 'valGlyphWobble', 'wobble', function (v) { return v.toFixed(1); }],
-    ];
-    function syncGlyphSliders() {
-      GLYPH_FIELDS.forEach(function (f) {
-        $(f[0]).value = state.glyph[f[2]];
-        $(f[1]).textContent = f[3](state.glyph[f[2]]);
-      });
-      $('glyphPreset').value = state.glyph.preset;
-    }
-    function glyphChanged() {
-      // the letterforms themselves changed, so both caches are stale
-      builtinCache = {}; layoutCache = {};
-      scheduleRender(true);
-    }
+    // start from the shared Liquid flow state, so the stock poster letters are
+    // the stock Font-tool letters
+    var lp = presetTable().liquid;
+    if (lp) SHAPE_KEYS.forEach(function (k) { if (finite(lp[k])) state.glyph[k] = lp[k]; });
     $('glyphPreset').addEventListener('change', function (ev) {
       var name = ev.target.value;
+      unmatchShape();
       state.glyph.preset = name;
-      var p = GLYPH_PRESETS[name];
-      if (p) Object.keys(p).forEach(function (k) { state.glyph[k] = p[k]; });
+      var p = presetTable()[name];
+      if (p) SHAPE_KEYS.forEach(function (k) { if (finite(p[k])) state.glyph[k] = p[k]; });
       syncGlyphSliders();
       glyphChanged();
     });
     GLYPH_FIELDS.forEach(function (f) {
       $(f[0]).addEventListener('input', function (ev) {
+        unmatchShape();
         state.glyph[f[2]] = parseFloat(ev.target.value);
         $(f[1]).textContent = f[3](state.glyph[f[2]]);
         state.glyph.preset = 'custom';
@@ -1552,7 +2155,28 @@
         glyphChanged();
       });
     });
-    syncGlyphSliders();
+
+    // -- Font-tool project link
+    $('useProject').addEventListener('change', function (ev) {
+      link.use = ev.target.checked;
+      srcVer++;
+      applyLinkShape(); updateProjectUI(); glyphChanged();
+    });
+    $('useProjectShape').addEventListener('change', function (ev) {
+      link.shape = ev.target.checked;
+      applyLinkShape(); updateProjectUI(); glyphChanged();
+    });
+    refreshProject(true);
+    // The Font tool autosaves from another tab: 'storage' fires here for every
+    // save. Saves come in bursts while a node is dragged, so settle first.
+    var projectTimer = null;
+    window.addEventListener('storage', function (e) {
+      if (e.key !== null && e.key !== PROJECT_KEY) return;
+      clearTimeout(projectTimer);
+      projectTimer = setTimeout(function () { refreshProject(false); }, 250);
+    });
+    // belt and braces for a missed event (e.g. edits made in this same tab)
+    window.addEventListener('focus', function () { refreshProject(false); });
 
     // -- rows / blocks
     renderBigRowCards();
@@ -1567,9 +2191,17 @@
         rot: last.rot || 0,
         style: last.style || 'melt',
         flow: last.flow, slant: last.slant, weight: last.weight, pocket: last.pocket,
-        xp: 50, yp: last.yp != null ? Math.min(112, last.yp + 16) : 50,
+        mode: last.mode || 'outline',
+        xp: 50, yp: 50,
       });
       autoFitRowSize(row, 0.8);
+      // Stack it under the last row using both real boxes (which already hold
+      // any accents), instead of a fixed step that stacked marks could overrun.
+      if (last.yp != null) {
+        var la = rowLayout(last), na = rowLayout(row), H = state.canvasH;
+        var step = la && na ? ((la.bbox[3] - la.bbox[1]) + (na.bbox[3] - na.bbox[1])) / 2 + H * 0.025 : H * 0.16;
+        row.yp = Math.min(112, last.yp + step / H * 100);
+      }
       state.bigRows.push(row);
       state.selected = { type: 'row', id: row.id };
       renderBigRowCards(); scheduleRender(true);
@@ -1638,11 +2270,12 @@
     $('btnExportSvg').addEventListener('click', exportSvg);
 
     // -- boot
-    state.bigRows.forEach(function (r) { autoFitRowSize(r, 0.8); });
+    state.bigRows.forEach(function (r) { autoFitRowSize(r, r.fit || 0.8); });
     renderBigRowCards();
     cachedContour = computeContour(false);
     zoomToFit();
     paint(cachedContour);
+    reportMissing();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { paint(cachedContour); });
     window.addEventListener('resize', function () { paint(cachedContour); });
   }
