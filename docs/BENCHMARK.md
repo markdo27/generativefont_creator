@@ -15,15 +15,19 @@ to the nearest half band.
 
 | Criterion | R1 (baseline) | R2 | R3 | R4 |
 |---|---|---|---|---|
-| C1 Letterform quality | 4.5 | 6.0 | 6.5 | — |
-| C2 Character coverage & Vietnamese | 2.5 | 6.0 | 7.0 | — |
-| C3 Spacing & metrics | 3.5 | 6.5 | 6.5 | — |
-| C4 Font-creation functions | 4.0 | 6.0 | 6.5 | — |
-| C5 Export & technical correctness | 4.5 | 6.5 | 7.0 | — |
-| C6 UX & interaction design | 5.0 | 6.5 | 7.0 | — |
-| C7 Visual aesthetic & brand | 6.5 | 7.0 | 7.0 | — |
-| C8 Robustness & performance | 5.5 | 6.0 | 6.5 | — |
-| **Overall** | **4.5** | **6.5** | **7.0** | — |
+| C1 Letterform quality | 4.5 | 6.0 | 6.5 | 7.0 |
+| C2 Character coverage & Vietnamese | 2.5 | 6.0 | 7.0 | 7.5 |
+| C3 Spacing & metrics | 3.5 | 6.5 | 6.5 | 7.0 |
+| C4 Font-creation functions | 4.0 | 6.0 | 6.5 | 7.0 |
+| C5 Export & technical correctness | 4.5 | 6.5 | 7.0 | 7.5 |
+| C6 UX & interaction design | 5.0 | 6.5 | 7.0 | 7.5 |
+| C7 Visual aesthetic & brand | 6.5 | 7.0 | 7.0 | 7.0 |
+| C8 Robustness & performance | 5.5 | 6.0 | 6.5 | 7.0 |
+| Mean | 4.50 | 6.31 | 6.75 | 7.19 |
+| **Overall band** | **4.5** | **6.5** | **7.0** | **7.0** |
+
+Every criterion rose by at least half a band from the baseline; Vietnamese
+(C2) moved furthest, from 2.5 to 7.5.
 
 ## Rubric
 
@@ -105,5 +109,41 @@ marks; GPOS mark-to-base + GDEF; class-based kerning (GPOS 160 KB → 33 KB);
 2000-unit em; hhea extents and Windows metrics; roving-tabindex glyph grid and
 skip links; focus-safe control bar; per-glyph melt tuning.
 
-### Round 4
-_Filled in after the final audit._
+### Round 4 — 7.0 (final)
+Verified: no ink collisions anywhere — about 75k live pairs per preset (base
+set plus composites) and 11k pairs shaped through HarfBuzz in the OTFs, closest
+0.30× the H|H gap (round 3's font had six collisions); 11,859 Vietnamese pairs
+per preset clean; every round-3 UX gap closed (Tab stops to Export 227 → 74,
+0 unnamed controls, poster undo with named steps); 321-glyph OTF (all 67
+Vietnamese caps, 179 Latin composites, lowercase mapped) passing OTS,
+fontTools and Chrome, class GPOS 32 KB, mark-to-base + GDEF, kerning identical
+to the app over 75k pairs; hostile and oversized project files handled; heavy
+presets' small counters reopened (Molten @ 0.05 → 0.16 of O).
+
+Remaining findings (why it is a 7, not an 8):
+- C1: symbols without melt tuning still clot in the heaviest presets; outlines
+  carry 63–136 segments with some extremes between nodes.
+- C3: rhythm slipped slightly (T with rounds loose, TO −2); punctuation tucks
+  clamped.
+- C2/C5: no mark-on-mark (mkmk) positioning or anchors on composites; Ł ß Ő Ű
+  Ș Ț Þ and several Latin-1 symbols still missing; uploaded-font Đ bar erodes in
+  the poster.
+- C4: no multi-node selection, glyph copy or user-added glyphs.
+- C6/C7: block add/remove jumped the view (a round-4 regression), black ink
+  blanked dark previews, 1024 px top bar overflowed; presets still read as one
+  family.
+- C8: slider scrubbing ~10 fps (engine-bound; a Web Worker pool is the next
+  step); OTF export blocks the main thread for ~0.6 s.
+
+### After round 4 (not scored)
+Fixed straight after the final audit, outside the four scored rounds: preview
+blocks keep the scroll position and focus the new block; black ink switches
+previews to paper; swatches keep focus; coverage moved into the character-set
+header so the topbar fits at 1024 px; focus never hides under the sticky
+mobile bar; poster captions follow the colour pair and focused fields stay in
+view; the descender includes the Latin composites (cedillas); Ð composes like
+Đ; Latin coverage extended to U+024F (321 glyphs, 560 cmap entries); the most
+specific kerning override wins (T|Á before T|A); Æ Ø Œ carry mark anchors;
+`post` underline metrics; accent-folded download names; the punctuation kern
+clamp relaxed (still no collisions in the all-pairs scan); melt factors for
+™ % ® & ₫ and a gentler W.
