@@ -1,12 +1,15 @@
 // ---------------------------------------------------------------------------
 // Raw sfnt table tools.
 //
-// opentype.js (1.3.4) writes a perfectly good OTF but cannot write kerning.
-// This module builds the missing piece as raw bytes and splices it into the
-// ArrayBuffer that font.toArrayBuffer() produced:
+// opentype.js (1.3.4) writes a perfectly good OTF but cannot write kerning
+// or mark positioning. This module builds the missing pieces as raw bytes and
+// splices them into the ArrayBuffer that font.toArrayBuffer() produced:
 //
-//   gposKern(pairs)          -> GPOS table bytes with a 'kern' feature made of
-//                               PairPos Format 1 subtables (XAdvance only).
+//   gpos({kern, marks})      -> GPOS table bytes: 'kern' (PairPos Format 1,
+//                               XAdvance only) and/or 'mark' (MarkBasePos
+//                               Format 1). gposKern(pairs) = kern only.
+//   gdef(classDefs)          -> GDEF table bytes with a GlyphClassDef, so
+//                               shapers know which glyphs are marks.
 //   injectTables(buf, tabs)  -> new sfnt with tables added / replaced / removed,
 //                               directory, checksums and head.checkSumAdjustment
 //                               all rebuilt.
@@ -27,6 +30,7 @@
   function tag(a, t) { for (var i = 0; i < 4; i++) a.push(t.charCodeAt(i) & 255); }
   function append(a, b) { for (var i = 0; i < b.length; i++) a.push(b[i]); }
   function byNum(a, b) { return a - b; }
+  function i16(v) { return Math.max(-32768, Math.min(32767, Math.round(v))) || 0; }
 
   // ---------------------------------------------------- PairPos subtable
   // Format 1, ValueFormat1 = XAdvance, ValueFormat2 = none. Layout:
@@ -52,27 +56,22 @@
     return a;
   }
 
-  // --------------------------------------------------------------- GPOS
+  // ---------------------------------------------------------- kern lookup
   // pairs: [[leftGid, rightGid, xAdvanceAdjust], ...] in font units.
   // Duplicates: the last entry for a pair wins; pairs whose final value is 0
-  // are dropped. Returns null when nothing is left to kern (no GPOS needed).
+  // are dropped. Returns the lookup bytes, or null when nothing is left.
   //
-  // Structure: ScriptList {DFLT, latn} -> DefaultLangSys -> feature 0 'kern'
-  // -> lookup 0 -> PairPos subtables, first glyphs split so no subtable
-  // passes opts.maxSubtableBytes (default 60000).
-  //
-  // The Lookup's own subtable offsets are 16-bit too, so once the subtables
+  // First glyphs are split so no PairPos subtable passes maxSub bytes. The
+  // Lookup's own subtable offsets are 16-bit too, so once the subtables
   // together pass 64K the lookup is written as type 9 (Extension, 32-bit
   // offsets) wrapping type-2 subtables. That only kicks in beyond roughly
   // 15000 pairs; note opentype.js 1.3.4 cannot read Extension lookups
   // (HarfBuzz, browsers and fontTools can).
-  function gposKern(pairs, opts) {
-    var maxSub = (opts && opts.maxSubtableBytes) || 60000;
+  function kernLookup(pairs, flag, maxSub) {
     var last = {}, sets = {}, firsts = [], i, k;
     for (i = 0; i < (pairs || []).length; i++) {
       var p = pairs[i];
-      last[(p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF)] =
-        Math.max(-32768, Math.min(32767, Math.round(p[2]))) || 0;
+      last[(p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF)] = i16(p[2]);
     }
     for (k in last) {
       if (!last[k]) continue;
@@ -102,7 +101,7 @@
     for (i = 0; i < n; i++) { offs.push(at); if (at > 0xFFFF) ext = true; at += subs[i].length; }
 
     var lookup = [];
-    u16(lookup, ext ? 9 : 2); u16(lookup, 0); u16(lookup, n);
+    u16(lookup, ext ? 9 : 2); u16(lookup, flag); u16(lookup, n);
     if (!ext) {
       for (i = 0; i < n; i++) u16(lookup, offs[i]);
     } else {
@@ -116,21 +115,172 @@
       }
     }
     for (i = 0; i < n; i++) append(lookup, subs[i]);
+    return lookup;
+  }
 
+  // ---------------------------------------------------------- mark lookup
+  // marks: { classes: { top: [[markGid, x, y], ...], bottom: [...] },
+  //          bases: [[baseGid, { top: [x, y], bottom: [x, y] }], ...] }
+  // -> type-4 lookup with one MarkBasePos Format 1 subtable, or null when
+  // there are no marks or no bases. Class numbers follow top, bottom, then
+  // any other names, skipping empty classes. A glyph listed twice keeps its
+  // last entry; a base with no anchor in any present class is dropped, and
+  // a missing anchor is a NULL offset (marks of that class stay put).
+  // Layout: header 12 | MarkCoverage | BaseCoverage | MarkArray | BaseArray,
+  // identical anchors shared within each array.
+  function coverage(gids) {
     var a = [];
-    // header: version 1.0, ScriptList @10, FeatureList @48, LookupList @62
-    u16(a, 1); u16(a, 0); u16(a, 10); u16(a, 48); u16(a, 62);
-    // ScriptList (38 bytes): 2 records sorted by tag, Script tables @14, @26
-    u16(a, 2); tag(a, 'DFLT'); u16(a, 14); tag(a, 'latn'); u16(a, 26);
+    u16(a, 1); u16(a, gids.length);
+    for (var i = 0; i < gids.length; i++) u16(a, gids[i]);
+    return a;
+  }
+
+  // Anchor Format 1 pool; offsets count from the owning array's start,
+  // with `start` bytes of records ahead of the pool.
+  function anchorPool(start) {
+    var at = {}, bytes = [];
+    return {
+      bytes: bytes,
+      off: function (x, y) {
+        var key = x + ',' + y;
+        if (!(key in at)) {
+          at[key] = start + bytes.length;
+          if (at[key] > 0xFFFF) throw new Error('FontTables: MarkBasePos anchor overflow');
+          u16(bytes, 1); u16(bytes, x); u16(bytes, y);
+        }
+        return at[key];
+      },
+    };
+  }
+
+  function sortedKeys(o) { return Object.keys(o).map(Number).sort(byNum); }
+
+  function markLookup(marks) {
+    if (!marks || !marks.classes) return null;
+    var names = ['top', 'bottom'], mk = {}, used = {}, cls = [], bs = {}, k, i, j;
+    for (k in marks.classes) if (names.indexOf(k) < 0) names.push(k);
+    for (i = 0; i < names.length; i++) {
+      var list = marks.classes[names[i]] || [];
+      for (j = 0; j < list.length; j++) mk[list[j][0] & 0xFFFF] = [names[i], i16(list[j][1]), i16(list[j][2])];
+    }
+    for (k in mk) used[mk[k][0]] = 1;
+    for (i = 0; i < names.length; i++) if (used[names[i]]) cls.push(names[i]);
+    if (!cls.length) return null;
+
+    for (i = 0; i < (marks.bases || []).length; i++) {
+      var b = marks.bases[i], anc = [], any = false;
+      for (j = 0; j < cls.length; j++) {
+        var q = b[1] && b[1][cls[j]];
+        anc.push(q ? [i16(q[0]), i16(q[1])] : null);
+        if (q) any = true;
+      }
+      if (any) bs[b[0] & 0xFFFF] = anc; else delete bs[b[0] & 0xFFFF];
+    }
+    var mg = sortedKeys(mk), bg = sortedKeys(bs), nm = mg.length, nb = bg.length, nc = cls.length;
+    if (!nb) return null;
+
+    var ma = [], mp = anchorPool(2 + 4 * nm);
+    u16(ma, nm);
+    for (i = 0; i < nm; i++) {
+      var m = mk[mg[i]];
+      u16(ma, cls.indexOf(m[0])); u16(ma, mp.off(m[1], m[2]));
+    }
+    append(ma, mp.bytes);
+    var ba = [], bp = anchorPool(2 + 2 * nc * nb);
+    u16(ba, nb);
+    for (i = 0; i < nb; i++) {
+      for (j = 0; j < nc; j++) { var c = bs[bg[i]][j]; u16(ba, c ? bp.off(c[0], c[1]) : 0); }
+    }
+    append(ba, bp.bytes);
+
+    var mc = coverage(mg), bc = coverage(bg);
+    var o2 = 12 + mc.length, o3 = o2 + bc.length, o4 = o3 + ma.length;
+    if (o4 > 0xFFFF) throw new Error('FontTables: MarkBasePos subtable overflow');
+    var lk = [];
+    u16(lk, 4); u16(lk, 0); u16(lk, 1); u16(lk, 8);               // Lookup, subtable @8
+    u16(lk, 1); u16(lk, 12); u16(lk, o2); u16(lk, nc); u16(lk, o3); u16(lk, o4);
+    append(lk, mc); append(lk, bc); append(lk, ma); append(lk, ba);
+    return lk;
+  }
+
+  // --------------------------------------------------------------- GPOS
+  // spec: { kern: pairs (see kernLookup), marks: (see markLookup),
+  //         ignoreMarks: bool }. Returns null when both parts are empty.
+  //
+  // Structure: ScriptList {DFLT, latn} -> DefaultLangSys -> every feature;
+  // FeatureList (by tag) 'kern' -> lookup 0, 'mark' -> lookup 1 (indices
+  // close up when a part is missing). The kern lookup gets IgnoreMarks
+  // (so A + U+0301 + V still kerns A/V, needs GDEF) whenever marks are
+  // present, unless spec.ignoreMarks says otherwise.
+  // opts.maxSubtableBytes (default 60000) caps PairPos subtables.
+  function gpos(spec, opts) {
+    spec = spec || {};
+    var maxSub = (opts && opts.maxSubtableBytes) || 60000;
+    var mark = markLookup(spec.marks);
+    var ign = spec.ignoreMarks != null ? !!spec.ignoreMarks : !!mark;
+    var kern = kernLookup(spec.kern, ign ? 0x0008 : 0, maxSub);
+    var feats = [], lookups = [], i, j;
+    if (kern) { feats.push('kern'); lookups.push(kern); }
+    if (mark) { feats.push('mark'); lookups.push(mark); }
+    if (!lookups.length) return null;
+
+    var nf = feats.length, nl = lookups.length;
+    var scr = 10 + 2 * nf, sl = 14 + 2 * scr, fl = 2 + 12 * nf;
+    var a = [];
+    u16(a, 1); u16(a, 0); u16(a, 10); u16(a, 10 + sl); u16(a, 10 + sl + fl);
+    // ScriptList: 2 records sorted by tag, one Script table each
+    u16(a, 2); tag(a, 'DFLT'); u16(a, 14); tag(a, 'latn'); u16(a, 14 + scr);
     for (i = 0; i < 2; i++) {
       u16(a, 4); u16(a, 0);                       // DefaultLangSys @4, no LangSys
-      u16(a, 0); u16(a, 0xFFFF); u16(a, 1); u16(a, 0);
+      u16(a, 0); u16(a, 0xFFFF); u16(a, nf);
+      for (j = 0; j < nf; j++) u16(a, j);
     }
-    // FeatureList (14 bytes): 'kern' -> Feature @8 -> lookup 0
-    u16(a, 1); tag(a, 'kern'); u16(a, 8); u16(a, 0); u16(a, 1); u16(a, 0);
-    // LookupList: one lookup @4
-    u16(a, 1); u16(a, 4);
-    append(a, lookup);
+    // FeatureList: records, then one Feature (one lookup) per record;
+    // feature j uses lookup j
+    u16(a, nf);
+    for (j = 0; j < nf; j++) { tag(a, feats[j]); u16(a, 2 + 6 * nf + 6 * j); }
+    for (j = 0; j < nf; j++) { u16(a, 0); u16(a, 1); u16(a, j); }
+    // LookupList: data placed smallest first, so a > 64K (Extension) kern
+    // lookup goes last and every 16-bit offset here still fits
+    var order = [], at = 2 + 2 * nl, offs = [];
+    for (i = 0; i < nl; i++) order.push(i);
+    order.sort(function (x, y) { return lookups[x].length - lookups[y].length; });
+    for (i = 0; i < nl; i++) {
+      if (at > 0xFFFF) throw new Error('FontTables: LookupList overflow');
+      offs[order[i]] = at; at += lookups[order[i]].length;
+    }
+    u16(a, nl);
+    for (i = 0; i < nl; i++) u16(a, offs[i]);
+    for (i = 0; i < nl; i++) append(a, lookups[order[i]]);
+    return new Uint8Array(a);
+  }
+
+  // Kerning-only GPOS (the original API).
+  function gposKern(pairs, opts) { return gpos({ kern: pairs }, opts); }
+
+  // --------------------------------------------------------------- GDEF
+  // classDefs: { gid: class } with 1 = base, 2 = ligature, 3 = mark,
+  // 4 = component; 0 / missing = unclassified. Version 1.0 with only a
+  // GlyphClassDef (ClassDef Format 2: runs of consecutive gids sharing a
+  // class); AttachList, LigCaretList and MarkAttachClassDef offsets are 0.
+  // Returns null when no glyph has a class.
+  function gdef(classDefs) {
+    var cd = {}, k, i;
+    for (k in classDefs || {}) {
+      var c = classDefs[k] & 0xFFFF;
+      if (c) cd[+k & 0xFFFF] = c;
+    }
+    var g = sortedKeys(cd), runs = [];
+    if (!g.length) return null;
+    for (i = 0; i < g.length; i++) {
+      var r = runs[runs.length - 1];
+      if (r && r[1] === g[i] - 1 && r[2] === cd[g[i]]) r[1] = g[i];
+      else runs.push([g[i], g[i], cd[g[i]]]);
+    }
+    var a = [];
+    u16(a, 1); u16(a, 0); u16(a, 12); u16(a, 0); u16(a, 0); u16(a, 0);
+    u16(a, 2); u16(a, runs.length);
+    for (i = 0; i < runs.length; i++) { u16(a, runs[i][0]); u16(a, runs[i][1]); u16(a, runs[i][2]); }
     return new Uint8Array(a);
   }
 
@@ -211,7 +361,9 @@
 
   return {
     readTable: readTable,
+    gpos: gpos,
     gposKern: gposKern,
+    gdef: gdef,
     injectTables: injectTables,
     checksum: checksum,
   };
