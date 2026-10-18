@@ -87,7 +87,7 @@ setTimeout(()=>{
         const vb=d.querySelectorAll('.tester')[0], vt=vb.querySelector('.tester-text');
         vt.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
         const ta=vb.querySelector('.tester-edit');
-        ta.value='TIE\u0302\u0301NG vie\u0323\u0302t @'; ta.dispatchEvent(new w.Event('blur'));
+        ta.value='TIE\u0302\u0301NG vie\u0323\u0302t \u20ac'; ta.dispatchEvent(new w.Event('blur'));
         const uses=[...vb.querySelectorAll('.tester-text use')].map(u=>u.getAttribute('href'));
         console.log('NFD + lowercase text uses composites:',uses.includes('#g1ebe')&&uses.includes('#g1ec6'),
           '| unknown char drawn as notdef box:',vb.querySelectorAll('svg.notdef').length===1);
