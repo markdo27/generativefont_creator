@@ -454,7 +454,10 @@ G = {k: G[k] for k in order}
 # states (mercury/molten/goo) at full melt; a lower factor keeps M's V and
 # slits, W's notches, the counters of # @ 8 B (>= ~0.15 O's) and Z's acute
 # corners open there, while liquid and bubble (low melt) barely change.
-TUNE = {'M': 0.7, 'W': 0.6, '#': 0.5, '@': 0.7, '8': 0.6, 'B': 0.7, 'Z': 0.7}
+# per-glyph melt factors: narrow counters take less melt so the heavy flow
+# states don't clot them (W at 0.75: lower thinned its inner strokes)
+TUNE = {'M': 0.7, 'W': 0.75, '#': 0.5, '@': 0.7, '8': 0.6, 'B': 0.7, 'Z': 0.7,
+        '\u2122': 0.5, '%': 0.55, '\u00AE': 0.55, '&': 0.6, '\u20AB': 0.6}
 data = {'H': H, 'W': W, 'glyphs': G, 'tune': {k: {'melt': f} for k, f in TUNE.items()}}
 json.dump(data, open('glyphs_meta.json', 'w'))
 # same data as a <script>-loadable global, for pages that skip bundle.py

@@ -308,7 +308,7 @@
     var A = spacingOf(a), B = spacingOf(b), it = interaction(A, B), v = 0;
     if (isFinite(it.minG)) {
       v = -(it.nest + 0.5 * Math.max(0, it.over - KOVER)) * state.kern;
-      v = Math.max(v, -0.45 * MET.capH, -0.6 * Math.min(A.adv, B.adv));   // never tuck a whole glyph under
+      v = Math.max(v, -0.45 * MET.capH, -0.85 * Math.min(A.adv, B.adv));   // never tuck a whole glyph under
       v = Math.min(v, 0.25 * KBASE);
       v = Math.max(v, 0.4 * KBASE - it.minG);   // the ink floor always wins (Ấ|Ầ: two side tones meeting)
     }
