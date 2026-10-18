@@ -123,12 +123,14 @@
   }
 
   // Partition refinement: lab[g] for g in gs is replaced by a dense id of
-  // (old label, value in row m). Returns the number of distinct ids.
+  // (old label, value in row m); old labels are >= -1. Returns the number
+  // of distinct ids.
   function refine(gs, lab, m) {
-    var ids = {}, n = 0, i;
+    var ids = new Map(), n = 0, i;
     for (i = 0; i < gs.length; i++) {
-      var k = lab[gs[i]] + ':' + (m[gs[i]] || 0);
-      lab[gs[i]] = k in ids ? ids[k] : (ids[k] = n++);
+      var k = (lab[gs[i]] + 1) * 65536 + (m[gs[i]] || 0) + 32768, id = ids.get(k);
+      if (id === undefined) ids.set(k, id = n++);
+      lab[gs[i]] = id;
     }
     return n;
   }
@@ -175,18 +177,50 @@
     return a;
   }
 
+  // Greedy packing of left classes (in order) into groups whose subtable
+  // stays under cap bytes. The right partition of the open group is refined
+  // row by row (new glyphs enter as "zero so far"); Coverage and ClassDefs
+  // are bounded by their worst-case encodings, so a real subtable is never
+  // bigger than the estimate. null when one left class alone exceeds cap.
+  function packClasses(classes, row, cap) {
+    var groups = [], cur = [], gl = {}, gR = [], nCov = 0, lo = 65535, hi = 0, i, j, k;
+    function est(c, nr, ncov, nR, span) {
+      return 16 + 2 * c * (nr + 1) + (4 + 2 * ncov) + (4 + 6 * ncov) + Math.min(4 + 6 * nR, 6 + 2 * span);
+    }
+    for (i = 0; i < classes.length; i++) {
+      var m = row[classes[i][0]], add = [], nlo = lo, nhi = hi;
+      for (k in m) if (!(k in gl)) { add.push(+k); if (+k < nlo) nlo = +k; if (+k > nhi) nhi = +k; }
+      // trial refinement on a copy, so the group can be closed unchanged
+      var tl = {}, tR = gR.concat(add).sort(byNum);
+      for (j = 0; j < gR.length; j++) tl[gR[j]] = gl[gR[j]];
+      for (j = 0; j < add.length; j++) tl[add[j]] = -1;
+      var tn = refine(tR, tl, m), tc = nCov + classes[i].length;
+      if (est(cur.length + 1, tn, tc, tR.length, nhi - nlo + 1) > cap) {
+        if (!cur.length) return null;
+        groups.push(cur);
+        cur = []; gl = {}; gR = []; nCov = 0; lo = 65535; hi = 0; i--;
+        continue;
+      }
+      cur.push(classes[i]); gl = tl; gR = tR; nCov = tc; lo = nlo; hi = nhi;
+    }
+    groups.push(cur);
+    return groups;
+  }
+
   // Classes from the full matrix: right classes = second glyphs with
   // identical (quantised) columns, then left classes = first glyphs with
   // identical rows over those right classes; this is already the exact
   // fixpoint, so one round suffices. Left classes, ordered by first gid,
-  // are then packed greedily into subtables of at most maxSub bytes (an
-  // upper-bound size estimate, so the real subtable is never larger); each
-  // subtable has its own Coverage subset and re-derived right classes.
+  // are packed into subtables (packClasses), each with its own Coverage
+  // subset and right classes re-derived over its rows only. Smaller
+  // subtables often need far fewer right classes each, so the packing is
+  // tried with caps maxSub, maxSub/2, ... (down to ~1000 bytes) and the
+  // smallest total wins.
   // Returns [] when every value rounds to 0, or null when even one left
-  // class alone cannot fit a subtable (> ~30000 right classes) -- the
-  // caller then writes Format 1.
+  // class alone cannot fit maxSub (> ~30000 right classes) -- the caller
+  // then writes Format 1.
   function classSubtables(sets, firsts, maxSub, q) {
-    var row = {}, L = [], seen = {}, i, j, k;
+    var row = {}, L = [], seen = {}, i, j;
     for (i = 0; i < firsts.length; i++) {
       var s = sets[firsts[i]], m = null;
       for (j = 0; j < s.length; j++) {
@@ -209,37 +243,22 @@
       classes[key[kk]].push(L[i]);
     }
 
-    // greedy packing; the right partition of the open group is refined row
-    // by row (new glyphs enter as "zero so far"), coverage and ClassDefs
-    // are bounded by their worst-case encodings
-    var groups = [], cur = [], gl = {}, gR = [], nCov = 0, lo = 65535, hi = 0;
-    function est(c, nr, ncov, nR, span) {
-      return 16 + 2 * c * (nr + 1) + (4 + 2 * ncov) + (4 + 6 * ncov) + Math.min(4 + 6 * nR, 6 + 2 * span);
-    }
-    for (i = 0; i < classes.length; i++) {
-      var mrow = row[classes[i][0]], add = [], nlo = lo, nhi = hi;
-      for (k in mrow) if (!(k in gl)) { add.push(+k); if (+k < nlo) nlo = +k; if (+k > nhi) nhi = +k; }
-      // trial refinement on a copy, so the group can be closed unchanged
-      var tl = {}, tR = gR.concat(add).sort(byNum);
-      for (j = 0; j < gR.length; j++) tl[gR[j]] = gl[gR[j]];
-      for (j = 0; j < add.length; j++) tl[add[j]] = -1;
-      var tn = refine(tR, tl, mrow), tc = nCov + classes[i].length;
-      if (cur.length && est(cur.length + 1, tn, tc, tR.length, nhi - nlo + 1) > maxSub) {
-        groups.push(cur);
-        cur = []; gl = {}; gR = []; nCov = 0; lo = 65535; hi = 0; i--;
-        continue;
+    var best = null, bestSize = Infinity, seenSplit = {};
+    for (var cap = maxSub; best === null || cap >= 1000; cap = Math.floor(cap / 2)) {
+      var groups = packClasses(classes, row, cap);
+      if (!groups) break;
+      var sig = groups.map(function (g) { return g.length; }).join(',');
+      if (seenSplit[sig]) continue;
+      seenSplit[sig] = 1;
+      var subs = [], size = 0;
+      for (i = 0; i < groups.length && subs; i++) {
+        var sub = classPairPos(groups[i], row);
+        if (sub) { subs.push(sub); size += sub.length + 2; } else subs = null;
       }
-      if (est(1, tn, classes[i].length, tR.length, nhi - nlo + 1) > maxSub && !cur.length) return null;
-      cur.push(classes[i]); gl = tl; gR = tR; nCov = tc; lo = nlo; hi = nhi;
+      if (subs && size < bestSize) { best = subs; bestSize = size; }
+      if (!subs && best === null) break;
     }
-    groups.push(cur);
-    var subs = [];
-    for (i = 0; i < groups.length; i++) {
-      var sub = classPairPos(groups[i], row);
-      if (!sub) return null;
-      subs.push(sub);
-    }
-    return subs;
+    return best;
   }
 
   // ---------------------------------------------------------- kern lookup
@@ -248,9 +267,10 @@
   // are dropped. Returns the lookup bytes, or null when nothing is left.
   //
   // mode: false = PairPos Format 1 (exact glyph pairs); true = Format 2
-  // (class kerning, values quantised to q, see classSubtables); null /
-  // 'auto' = Format 1 up to CLASS_AUTO distinct pairs, beyond that both are
-  // built and the smaller one is kept.
+  // (class kerning, values quantised to q, see classSubtables; Format 1 if
+  // that cannot be encoded); null / 'auto' = Format 1 up to CLASS_AUTO
+  // distinct nonzero pairs, beyond that both are built and the smaller one
+  // is kept.
   //
   // First glyphs are split so no PairPos subtable passes maxSub bytes. The
   // Lookup's own subtable offsets are 16-bit too, so once the subtables
@@ -261,28 +281,28 @@
   var CLASS_AUTO = 2000;
 
   function kernLookup(pairs, flag, maxSub, mode, q) {
-    var last = {}, sets = {}, firsts = [], i, k, count = 0;
+    var last = new Map(), sets = {}, firsts = [], i, count = 0;
     for (i = 0; i < (pairs || []).length; i++) {
       var p = pairs[i];
-      last[(p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF)] = i16(p[2]);
+      last.set((p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF), i16(p[2]));
     }
-    for (k in last) {
-      if (!last[k]) continue;
+    last.forEach(function (v, k) {
+      if (!v) return;
       var l = Math.floor(k / 65536);
       if (!sets[l]) { sets[l] = []; firsts.push(l); }
-      sets[l].push([k % 65536, last[k]]);
+      sets[l].push([k % 65536, v]);
       count++;
-    }
+    });
     if (!firsts.length) return null;
     firsts.sort(byNum);
     for (i = 0; i < firsts.length; i++) sets[firsts[i]].sort(function (a, b) { return a[0] - b[0]; });
 
-    var cls = null;
-    if (mode === true || (mode == null || mode === 'auto') && count > CLASS_AUTO) {
+    var cls = null, auto = mode == null || mode === 'auto', force = !auto && !!mode;
+    if (force || auto && count > CLASS_AUTO) {
       var cs = classSubtables(sets, firsts, maxSub, q);
       if (cs && !cs.length) return null;       // everything rounded to 0
       if (cs) cls = kernWrap(cs, flag);
-      if (mode === true && cls) return cls;
+      if (force && cls) return cls;
     }
     var f1 = kernWrap(pairSubtables(sets, firsts, maxSub), flag);
     return cls && cls.length < f1.length ? cls : f1;
@@ -416,7 +436,7 @@
   function gpos(spec, opts) {
     spec = spec || {};
     var maxSub = (opts && opts.maxSubtableBytes) || 60000;
-    var q = opts && opts.kernQuantum != null ? opts.kernQuantum : 2;
+    var q = Math.round(opts && opts.kernQuantum != null ? opts.kernQuantum : 2) || 1;
     var mode = spec.kernClasses != null ? spec.kernClasses : opts && opts.kernClasses;
     var pairs = spec.kern && !Array.isArray(spec.kern) ? spec.kern.pairs : spec.kern;
     var mark = markLookup(spec.marks);
