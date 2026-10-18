@@ -97,6 +97,10 @@ automatic kerning.
   effect produced, so Solid reads as a solid mass while Contour reads as
   concentric bands.
 
+  **Undo / persistence** — the composition autosaves to this browser
+  (`liquidfont.poster.v1`, validated on load); Ctrl/⌘Z / Shift+Ctrl/⌘Z undo
+  and redo every gesture, Reset included.
+
   **Small text** — any number of independent blocks, each with its own
   Google Mono face, size, leading, alignment, position and colour, drawn
   crisply on top and untouched by the melt. Block colour is independent of the
@@ -147,6 +151,11 @@ under the foot line. Floating marks are traced as separate fields, so the
 melt can never weld them to the letter; the horn (Ơ Ư) and Đ bar are fused
 and melt in like any stroke.
 
+The same machinery covers other Latin capitals: diaeresis, ring, caron, dot
+above, macron, cedilla and ogonek are mark glyphs too, and the app computes
+every precomposed capital the current marks can build (Ä Å Ç Č Ñ Š Ž Ę …),
+lists them in the *Latin* row and exports them.
+
 Selecting a Vietnamese letter in the editor shows its base nodes (grey) and
 its mark nodes (brown): dragging a mark node edits that mark in every letter
 that uses it. *Mark size* and *Mark gap* in the editor panel tune all marks at
@@ -172,7 +181,9 @@ farther apart the nearest inks are than the two sidebearings alone would put
 them: A|V, L|T, P|.) and *shared open white* (white both shapes leave open in
 the same rows, relative to H|H: the hole under T's arm, the bellies of O|O). A
 floor keeps the nearest ink — accents included — at least 0.4 × the H|H gap
-apart. HH, TH, NN stay at zero.
+apart (the nearest-ink test also looks ±10% of the cap height up and down, so
+a period beside the low bar of a 4 counts). HH, TH, NN stay at zero. A pair
+override set on base letters (TA) applies to their accented forms (TÁ TẤ).
 Per-glyph `Left SB` / `Right SB` fields override the automatic sidebearings
 (stored as offsets, so they survive later shape changes), and the `Pair` row
 overrides any single pair's kerning (Vietnamese letters included) with a live
@@ -198,6 +209,8 @@ Poster tool reads so posters use your glyphs.
   drawn `.notdef`, AGL glyph names, measured vertical metrics (hhea = typo,
   OS/2 v4 with USE_TYPO_METRICS, Vietnamese code page), real `hmtx` left
   sidebearings, an ASCII-safe PostScript name (the Unicode family name is
-  kept), GPOS kerning.
+  kept), a 2000-unit em, class-based GPOS kerning (PairPos format 2) and GPOS
+  mark-to-base anchors + GDEF, so combining accents land on any letter even
+  without a precomposed glyph.
 - **SVG / PNG** — the whole specimen (every preview block with its own size,
   leading, tracking and ink/paper colours).
