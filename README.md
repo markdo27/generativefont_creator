@@ -192,16 +192,24 @@ closed.
 
 Spaces are never collapsed: every space (or tab) is one word space, so two
 spaces show as two; `\n` is a hard line break. Lines wrap between words, and
-the spaces where a line wraps hang past the right edge (as in any text field,
-the caret stays at the edge until the next word starts). A word wider than
-the column shrinks the block to fit, down to 8px; one still too wide breaks
-between letters. Accents on the first line that rise above its leading add
-just enough room above it. An emoji, flag or ZWJ sequence the font can't draw
-is one dashed box and one caret step. The SVG / PNG specimen exports use this
-same layout and fit rule, line breaks included.
+the one space where a line wraps hangs past the right edge; more spaces than
+that flow on to the next line (as CSS `break-spaces` does), so every space you
+type at the edge, or on a line of nothing but spaces, moves the caret. A word
+wider than the column shrinks the block to fit, down to 8px; one still too
+wide breaks between letters. Every block keeps room above its first line for
+the font's ascender (its tallest stacked Vietnamese capital), as a line box
+keeps a font's ascent and as the export does, so typing an accent never moves
+the text. An emoji, flag or ZWJ sequence the font can't draw is one dashed box
+and one caret step. The SVG / PNG specimen exports use this same layout and
+fit rule, line breaks included.
 
-In Windows High Contrast (forced colours) the caret and focus rule are drawn
-in the system text colour and the selection in the system highlight.
+The selection and the empty-block placeholder take their colours from the ink
+and the ground by the WCAG contrast formula: the selection stands at least 3:1
+off the ground with the ink at least 3:1 on it (on the grey ink that makes it a
+light band under the letters), and the placeholder at least 3:1 off the ground,
+on every ink swatch and on paper. In Windows High Contrast (forced colours)
+the caret and focus rule are drawn in the system text colour and the selection
+in the system highlight.
 
 ## Vietnamese and diacritics
 

@@ -266,12 +266,14 @@ html, body {
    they read the same on black and on paper. */
 .tester-text { position: relative; }
 .tester-glyphs { display: block; width: 100%; overflow: visible; }
-/* --sel-a / --ph-a are set from the ink (app.js paint): a dim grey ink gets
-   a stronger tint, so selection and placeholder stay visible on black */
-.tester-ink.is-ph { opacity: var(--ph-a, 0.35); }
+/* --sel-c / --ph-a are worked out from the ink and the ground (app.js
+   inkTones): the selection >= 3:1 off the ground with the ink >= 3:1 on it,
+   the placeholder >= 3:1 off the ground, on every ink swatch and on paper */
+.tester-text { --sel-c: #5b5b5b; --ph-a: 0.36; }
+.tester-ink.is-ph { opacity: var(--ph-a); }
 .tester-ink .notdef { stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 4 3; }
-.tester-sel rect { fill: currentColor; opacity: var(--sel-a, 0.25); }
-.tester-sel rect.comp { opacity: 0.75; }
+.tester-sel rect { fill: var(--sel-c); }
+.tester-sel rect.comp { fill: currentColor; opacity: 0.75; }
 /* focus: a hairline of ink draws down the left edge of the text */
 .tester-text::before {
   content: ''; position: absolute; left: -12px; top: 0; bottom: 0; width: 1px;

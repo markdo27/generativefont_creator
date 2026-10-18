@@ -526,8 +526,11 @@
   // combining marks — which are also the caret's steps.
   // Whitespace: every space or tab is one word space and nothing collapses
   // (two spaces show as two); '\n' is a hard line break. Lines wrap between
-  // words; the spaces where a line wraps hang past the right edge (they take
-  // no room) and the next line starts with the next word. A word wider than
+  // words; the space where a line wraps hangs past the right edge (it takes
+  // no room) and the next line starts with the next word. More spaces than
+  // that wrap with it, as CSS break-spaces does: a run of spaces typed at
+  // the edge, or a line of nothing but spaces, flows on to the next line,
+  // so every space still moves the caret. A word wider than
   // the column shrinks the block to fit (down to 8px); one still too wide
   // at that size breaks between letters. Tracking goes between neighbouring
   // glyphs of a word, kerning between two drawn ones; a character the font
@@ -591,10 +594,16 @@
         lines.push(line); line = newLine(); x = 0; hasWord = false;
         continue;
       }
-      if (t.t === 'sp') { t.x0 = x; x += spW; t.x1 = x; line.items.push(t); continue; }
+      if (t.t === 'sp') {
+        // a space that would start past the edge goes to the next line
+        if (x >= maxW && line.items.length) { lines.push(line); line = newLine(); x = 0; hasWord = false; }
+        t.x0 = x; x += spW; t.x1 = x; line.items.push(t); continue;
+      }
       wd = t.word;
       if (wd.i0 === i) {
-        if (hasWord && x + wd.w * size > maxW) { lines.push(line); line = newLine(); x = 0; }
+        // a word that doesn't fit after what is on the line (words, or the
+        // spaces that open it) starts the next one
+        if ((hasWord || x > 0) && x + wd.w * size > maxW) { lines.push(line); line = newLine(); x = 0; }
         hasWord = true; wx = x;
         wd.brk = wd.w * size > maxW;   // too wide even at the fitted size: breaks between letters
       } else if (wd.brk && wx + t.e1 * size > maxW && line.glyphs.length) {
@@ -842,15 +851,41 @@
   var IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
   var PLACEHOLDER = 'Type here', BURST_MS = 1000;
   function inkOf(b) { return b.paper || state.ink === '#000000' ? '#000' : state.ink; }
-  // Accents on the first drawn line that reach higher than its half-leading
-  // need headroom above it: exactly as much as the tallest of them, so a dot
-  // below, or an acute the leading already holds, adds none.
-  function headroomOf(lay, L, capH) {
-    var ln = lay.lines[0], lim = MET.cap - 0.02 * MET.em, top = lim;
-    for (var j = 0; ln && j < ln.glyphs.length; j++) { var g = ln.glyphs[j]; if (!g.notdef && g.s.top < top) top = g.s.top; }
-    if (top >= lim) return 0;
-    return Math.max(0, ((MET.base - top) / MET.em + 0.04) * lay.size - (L + capH) / 2);
+  // Selection and placeholder colours, worked out from the ink and the
+  // ground with the WCAG contrast formula (not a fixed tint, which faded to
+  // ~1.3:1 on the grey ink): the selection stands >= 3:1 off the ground and
+  // the ink >= 3:1 off the selection — on a grey ink that can only be a
+  // light selection under the letters — and the placeholder >= 3:1 off the
+  // ground. Colours are mixed the way the browser blends them (in sRGB).
+  var MIN_CONTRAST = 3.2;   // 3:1, with a margin for rounding
+  function rgbOf(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) h = h.replace(/./g, '$&$&');
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
   }
+  function lumOf(c) {
+    var f = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  }
+  function contrastOf(a, b) { var x = lumOf(a), y = lumOf(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mixOf(a, b, t) { return a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); }); }
+  function inkTones(ink, ground) {
+    var I = rgbOf(ink), G = rgbOf(ground), far = lumOf(G) < 0.5 ? [255, 255, 255] : [0, 0, 0], t, best = null, bestScore = -1;
+    for (t = 0.05; t <= 1.0001; t += 0.01) {   // selection: the nearest-to-ground colour that passes both
+      var S = mixOf(G, far, t), score = Math.min(contrastOf(S, G), contrastOf(I, S));
+      if (score >= MIN_CONTRAST) { best = S; break; }
+      if (score > bestScore) { bestScore = score; best = S; }
+    }
+    var ph = 1;
+    for (t = 0.2; t <= 1.0001; t += 0.01) if (contrastOf(mixOf(G, I, t), G) >= MIN_CONTRAST) { ph = t; break; }
+    return { sel: 'rgb(' + best.join(',') + ')', ph: Math.min(1, ph).toFixed(2) };
+  }
+  // Room above the first line for the font's ascender (ASC_EM: its tallest
+  // stacked Vietnamese capital), whatever the text — the way a line box
+  // keeps a font's ascent, and the way the export lays a block out. Room
+  // that came and went with the text made the block jump down at the first
+  // accent typed, and back up on leaving it.
+  function headroomOf(size, L, capH) { return Math.max(0, (ASC_EM + 0.02) * size - (L + capH) / 2); }
   document.addEventListener('selectionchange', function () { if (activeEd) activeEd.syncSel(); });
 
   function makeEditor(root, body, b) {
@@ -934,16 +969,15 @@
       if (ta.value !== b.text && !ed.composing) ta.value = b.text;   // the textarea always holds the block's text
       var text = b.text, lay = layoutText(text, b.size, b.tr, maxW, true);
       var size = lay.size, L = b.lh / 100 * size, capH = CAP_EM * size;
-      var pad = headroomOf(lay, L, capH);
-      ed.padTop = ed.focused ? Math.max(pad, ed.padTop) : pad;   // never shrinks under the caret: on leaving
+      ed.padTop = headroomOf(size, L, capH);
       ed.lay = lay; ed.L = L; ed.capH = capH;
       var ink = inkOf(b);
       if (ink !== ed.ink) {   // selection and placeholder stay visible on a dim ink too
         ed.ink = ink;
         surface.style.color = ink;
-        var tone = ink === '#000' ? 0 : Math.max(parseInt(ink.slice(1, 3), 16), parseInt(ink.slice(3, 5), 16), parseInt(ink.slice(5, 7), 16));
-        surface.style.setProperty('--sel-a', tone ? Math.min(0.6, Math.max(0.25, 64 / tone)).toFixed(2) : '0.25');
-        surface.style.setProperty('--ph-a', tone ? Math.min(0.75, Math.max(0.3, 90 / tone)).toFixed(2) : '0.42');
+        var tones = inkTones(ink, ink === '#000' ? '#fff' : '#000');   // the ground: paper, or the black specimen
+        surface.style.setProperty('--sel-c', tones.sel);
+        surface.style.setProperty('--ph-a', tones.ph);
       }
       // an empty block keeps the height of one line
       svg.setAttribute('height', (ed.padTop + lay.lines.length * L).toFixed(1));
@@ -1345,7 +1379,7 @@
       surface.classList.remove('is-focused');
       clearTimeout(ed.missT);
       if (!ed.winBlur) reportMissing(b.text);
-      queue(ed.padTop > 0);   // headroom kept while typing may go
+      queue();
     });
     return ed;
   }
