@@ -110,7 +110,7 @@
   function makeBlock(over) {
     var b = {
       id: ++uid, text: 'NEW TEXT', font: "'JetBrains Mono'",
-      size: 15, lh: 145, align: 'left', xp: 6, yp: 92, color: '#141414',
+      size: 30, lh: 130, align: 'left', xp: 6, yp: 92, color: '#141414',
     };
     if (over) Object.keys(over).forEach(function (k) { b[k] = over[k]; });
     return b;
@@ -120,11 +120,13 @@
   // specimen; the Vietnamese subhead ("night tempo") shows the composed
   // accents and the second title style without crowding the headline.
   // `fit` asks for an auto size at boot (a fraction of the poster width).
+  // Three clear steps of scale: headline ~2.7x the subhead, subhead ~2.5x
+  // the caption, and the caption still legible at Fit zoom.
   function defaultRows() {
     return [
-      makeRow({ text: 'TEMPO', mode: 'filled', yp: 41, fit: 0.8 }),
+      makeRow({ text: 'TEMPO', mode: 'filled', yp: 40, fit: 0.88 }),
       makeRow({
-        text: 'NHỊP ĐÊM', yp: 62, fit: 0.56,
+        text: 'NHỊP ĐÊM', yp: 59.5, fit: 0.5,
         style: 'ink', mode: 'filled', flow: 12, slant: 6, weight: 0.7,
       }),
     ];
@@ -133,7 +135,7 @@
     return [
       makeBlock({
         text: 'TEMPO CLUB / 00:00\n012KM NIGHT LOOP',
-        align: 'right', xp: 94, yp: 7,
+        size: 30, lh: 130, align: 'right', xp: 93, yp: 8,
       }),
     ];
   }
@@ -324,10 +326,24 @@
     builtinCache[key] = v;
     return v;
   }
+  // Per-glyph melt factor from the glyph data (GLYPH_DATA.tune, the same
+  // table the Font tool's meltFor() reads): M, W, #, @, 8… melt less so their
+  // narrow counters don't clot in the heavy flow states. A fused composite
+  // (Ơ, Đ) is looked up by its own key, then by its base letter.
+  var TUNE = GLYPH_DATA.tune && typeof GLYPH_DATA.tune === 'object' ? GLYPH_DATA.tune : null;
+  function meltFactor(k) {
+    if (!TUNE) return 1;
+    var keys = [k, Array.from(k)[0]];
+    for (var i = 0; i < keys.length; i++) {
+      var t = hasOwn(TUNE, keys[i]) && TUNE[keys[i]];
+      if (t && finite(t.melt) && t.melt >= 0) return t.melt;
+    }
+    return 1;
+  }
   function traceOptsFor(k) {
     var g = state.glyph;
     var o = {
-      mass: g.mass, melt: g.melt, tension: g.tension, wobble: g.wobble,
+      mass: g.mass, melt: g.melt * meltFactor(k), tension: g.tension, wobble: g.wobble,
       grain: g.grain, smooth: g.smooth, res: g.res || 1.6, simplify: 0.3,
       seed: glyphSeed() + k.charCodeAt(0) * 13,
     };
@@ -436,6 +452,47 @@
     if (y1 > band[1]) band[1] = y1;
   }
 
+  // Spacing of accented letters. A cluster advances by its LETTER's ink (the
+  // plain base plus anything fused into it, the Ơ/Ư horn and the Đ bar),
+  // never by its floating marks: a tone beside a circumflex, or a hook, sits
+  // above the cap line and may overhang the neighbour, as in the Font tool.
+  // Without this "TIẾNG" opened a gap after the Ế. The only thing that can
+  // then collide is two neighbours' marks, so those get a kerning floor:
+  // never closer than MARK_KERN glyph units, at the same height.
+  var MARK_KERN = 4;
+  // Boxes of a cluster's floating marks, split into the ones above the
+  // letter and the ones below it: [top, bottom], each [x0, y0, x1, y1] or null.
+  function splitMarkBoxes(items, boxOf, midY) {
+    var out = [null, null];
+    items.forEach(function (it) {
+      var b = boxOf(it);
+      if (!b) return;
+      var i = (b[1] + b[3]) / 2 < midY ? 0 : 1, o = out[i];
+      out[i] = o ? [Math.min(o[0], b[0]), Math.min(o[1], b[1]), Math.max(o[2], b[2]), Math.max(o[3], b[3])] : b;
+    });
+    return out[0] || out[1] ? out : null;
+  }
+  // How far right a cluster whose marks sit at `boxes` (already placed, in
+  // poster px) has to move so they clear every earlier mark in the row.
+  function markKernPush(boxes, placed, gap) {
+    var push = 0;
+    if (!boxes) return 0;
+    placed.forEach(function (p) {
+      boxes.forEach(function (b, i) {
+        var q = p[i];
+        if (!b || !q || b[1] > q[3] + gap || b[3] < q[1] - gap) return;
+        // only marks that would otherwise overlap from the left; one that
+        // ends up entirely to the left of an earlier mark is a separate case
+        if (b[2] <= q[0]) return;
+        push = Math.max(push, q[2] + gap - b[0]);
+      });
+    });
+    return push;
+  }
+  function shiftBoxes(boxes, dx, dy) {
+    return boxes && boxes.map(function (b) { return b && [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]; });
+  }
+
   // Lay out one row using the built-in glyph set. Returns the same shape as
   // uploadRowGeom so the rest of the pipeline never has to know which font
   // source produced it.
@@ -446,13 +503,26 @@
   function builtinRowGeom(text, size, tracking) {
     var scale = size / GH, gap = tracking * size;
     var x = 0, y = 0, polys = [], markPolys = [], missing = [], band = [1e9, -1e9];
+    var placedMarks = [];
     clustersOf(text).forEach(function (c) {
       if (isSpace(c)) { x += SPACE * scale + gap; return; }
       var cg = clusterGlyph(c);
       if (!cg) { missing.push(c); x += SPACE * scale + gap; return; }
-      var rings = cg.rings, bb = inkBounds(rings);
+      var rings = cg.rings;
+      var letter = cg.marks ? rings.filter(function (r) { return !cg.marks.has(r); }) : rings;
+      var bb = inkBounds(letter.length ? letter : rings);
       var w = (bb[1] - bb[0] + SIDE * 2) * scale;
       var ox = x - (bb[0] - SIDE) * scale;
+      if (cg.marks && letter.length) {
+        var ly = ringsYRange(letter);
+        var mb = splitMarkBoxes(rings.filter(function (r) { return cg.marks.has(r); }), function (r) {
+          var b = GC.bbox([r]);
+          return b && [ox + b[0] * scale, y + b[1] * scale, ox + b[2] * scale, y + b[3] * scale];
+        }, y + (ly ? (ly[0] + ly[1]) / 2 : GH / 2) * scale);
+        var push = markKernPush(mb, placedMarks, MARK_KERN * scale);
+        if (push > 0) { x += push; ox += push; mb = shiftBoxes(mb, push, 0); }
+        if (mb) placedMarks.push(mb);
+      }
       for (var r = 0; r < rings.length; r++) {
         var ring = rings[r], poly = new Array(ring.length);
         for (var p = 0; p < ring.length; p++) poly[p] = [ox + ring[p][0] * scale, y + ring[p][1] * scale];
@@ -509,21 +579,38 @@
   function builtinInkGeom(text, size, tracking, weight) {
     var scale = size / GH, gap = tracking * size;
     var x = 0, chains = [], markChains = [], missing = [], band = [1e9, -1e9];
+    var placedMarks = [];
     clustersOf(text).forEach(function (c) {
       if (isSpace(c)) { x += SPACE * scale + gap; return; }
       var cc = clusterChains(c);
       if (!cc) { missing.push(c); x += SPACE * scale + gap; return; }
       var all = cc.base.concat(cc.marks);
-      var nmin = 1e9, nmax = -1e9;
-      all.forEach(function (ch) {
+      // advance from the letter (fused horn / bar are in cc.base); marks overhang
+      var nmin = 1e9, nmax = -1e9, ny0 = 1e9, ny1 = -1e9;
+      (cc.base.length ? cc.base : all).forEach(function (ch) {
         ch.forEach(function (n) {
           if (n[0] - n[2] < nmin) nmin = n[0] - n[2];
           if (n[0] + n[2] > nmax) nmax = n[0] + n[2];
+          if (n[1] < ny0) ny0 = n[1];
+          if (n[1] > ny1) ny1 = n[1];
         });
       });
-      if (nmin > nmax) { nmin = 0; nmax = GW; }
+      if (nmin > nmax) { nmin = 0; nmax = GW; ny0 = 0; ny1 = GH; }
       var w = (nmax - nmin + SIDE * 2) * scale;
       var ox = x - (nmin - SIDE) * scale;
+      if (cc.marks.length && cc.base.length) {
+        var mb = splitMarkBoxes(cc.marks, function (ch) {
+          var b = [1e9, 1e9, -1e9, -1e9];
+          ch.forEach(function (n) {
+            var r = Math.max(0.6, n[2] * scale * weight) / scale;
+            b = [Math.min(b[0], n[0] - r), Math.min(b[1], n[1] - r), Math.max(b[2], n[0] + r), Math.max(b[3], n[1] + r)];
+          });
+          return b[0] <= b[2] ? [ox + b[0] * scale, b[1] * scale, ox + b[2] * scale, b[3] * scale] : null;
+        }, (ny0 + ny1) / 2 * scale);
+        var push = markKernPush(mb, placedMarks, MARK_KERN * scale);
+        if (push > 0) { x += push; ox += push; mb = shiftBoxes(mb, push, 0); }
+        if (mb) placedMarks.push(mb);
+      }
       all.forEach(function (ch, ci) {
         var isBase = ci < cc.base.length;
         (isBase ? chains : markChains).push(ch.map(function (n) {
@@ -568,9 +655,100 @@
   // opentype.js has no mark positioning (no GPOS), so a letter the font lacks
   // precomposed is rebuilt from its NFD base + combining-mark glyphs, each mark
   // centred on the base's ink and nudged clear of it (and of the previous mark).
+  // Vietnamese follows the Font tool's convention (GlyphCompose.compose): a
+  // tone after a circumflex sits BESIDE it, not on top (acute and hook to the
+  // right, grave to the left, tucked over the circumflex's outer edge), and a
+  // circumflex / breve that carries a tone is squashed to keep the stack low.
   var MARK_ABOVE = /[\u0300-\u0315\u031A\u033D-\u0344\u0346\u034A-\u034C\u0350-\u0352\u0357\u035B\u0363-\u036F]/;
   var MARK_BELOW = /[\u0316-\u0319\u031C-\u0333\u0339-\u033C\u0347-\u0349\u034D\u034E\u0353-\u0356\u0359\u035A]/;
   var DECOMPOSE_EXTRA = { 'Đ': 'D\u0335', 'đ': 'd\u0335' };
+  var BESIDE_CIRC = { '\u0301': 1, '\u0309': 1, '\u0300': -1 };   // acute, hook right; grave left
+  // the same numbers as GlyphCompose.LAYOUT (glyph units, cap height = 100)
+  function composeLayout() {
+    var L = GC && GC.LAYOUT || {};
+    return {
+      tuck: finite(L.sideTuck) ? L.sideTuck : 3, rise: finite(L.sideRise) ? L.sideRise : 0.55,
+      squash: finite(L.squash) ? L.squash : 0.8, clear: finite(L.clear) ? L.clear : 3,
+    };
+  }
+  // Path commands -> closed polylines (curves sampled), for clearance checks.
+  function cmdsToRings(cmds) {
+    var rings = [], cur = null, px = 0, py = 0, N = 8;
+    cmds.forEach(function (c) {
+      if (c.type === 'M') { cur = [[c.x, c.y]]; rings.push(cur); px = c.x; py = c.y; return; }
+      if (!cur) { cur = [[px, py]]; rings.push(cur); }
+      var i, t, u;
+      if (c.type === 'L') cur.push([c.x, c.y]);
+      else if (c.type === 'Q') {
+        for (i = 1; i <= N; i++) {
+          t = i / N; u = 1 - t;
+          cur.push([u * u * px + 2 * u * t * c.x1 + t * t * c.x, u * u * py + 2 * u * t * c.y1 + t * t * c.y]);
+        }
+      } else if (c.type === 'C') {
+        for (i = 1; i <= N; i++) {
+          t = i / N; u = 1 - t;
+          cur.push([u * u * u * px + 3 * u * u * t * c.x1 + 3 * u * t * t * c.x2 + t * t * t * c.x,
+                    u * u * u * py + 3 * u * u * t * c.y1 + 3 * u * t * t * c.y2 + t * t * t * c.y]);
+        }
+      } else if (c.type === 'Z') { cur = null; return; }
+      if (c.x != null) { px = c.x; py = c.y; }
+    });
+    return rings.filter(function (r) { return r.length > 1; });
+  }
+  function ptSegDist(p, a, b) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+    var t = l2 > 1e-9 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+  }
+  // Smallest outline-to-outline distance, or Infinity beyond `limit`; 0 when
+  // one shape's vertex lies inside the other's box overlap and they cross.
+  function ringsGap(ra, rb, limit) {
+    var A = GC ? GC.bbox(ra) : null, B = GC ? GC.bbox(rb) : null;
+    if (!A || !B) return Infinity;
+    if (A[0] > B[2] + limit || B[0] > A[2] + limit || A[1] > B[3] + limit || B[1] > A[3] + limit) return Infinity;
+    var best = Infinity;
+    function scan(P, R) {
+      P.forEach(function (r) {
+        r.forEach(function (p) {
+          R.forEach(function (s) {
+            for (var k = 0; k < s.length; k++) {
+              var d = ptSegDist(p, s[k], s[(k + 1) % s.length]);
+              if (d < best) best = d;
+            }
+          });
+        });
+      });
+    }
+    scan(ra, rb); scan(rb, ra);
+    return best;
+  }
+  function shiftCmds(cmds, dx, dy) {
+    return cmds.map(function (c) {
+      var o = { type: c.type };
+      ['x', 'x1', 'x2'].forEach(function (k) { if (c[k] != null) o[k] = c[k] + dx; });
+      ['y', 'y1', 'y2'].forEach(function (k) { if (c[k] != null) o[k] = c[k] + dy; });
+      return o;
+    });
+  }
+  // vertical squash about the shape's own bottom edge (canvas y grows down)
+  function squashCmds(cmds, bottom, k) {
+    return cmds.map(function (c) {
+      var o = {}; for (var key in c) o[key] = c[key];
+      ['y', 'y1', 'y2'].forEach(function (yk) { if (o[yk] != null) o[yk] = bottom - (bottom - o[yk]) * k; });
+      return o;
+    });
+  }
+  function cmdsBox(cmds) {
+    var b = [1e9, 1e9, -1e9, -1e9];
+    cmdsToRings(cmds).forEach(function (r) {
+      r.forEach(function (p) {
+        if (p[0] < b[0]) b[0] = p[0]; if (p[0] > b[2]) b[2] = p[0];
+        if (p[1] < b[1]) b[1] = p[1]; if (p[1] > b[3]) b[3] = p[1];
+      });
+    });
+    return b[0] <= b[2] ? b : null;
+  }
   function drawDecomposed(font, c, x, size, cmds, markCmds) {
     var cps = Array.from(DECOMPOSE_EXTRA[c] || c.normalize('NFD'));
     var bi = /^\p{M}/u.test(cps[0]) ? 0 : glyphIndexFor(font, cps[0]);
@@ -583,31 +761,69 @@
     var x1 = bb ? bb.x1 : x, x2 = bb ? bb.x2 : x + adv;
     var top = bb ? bb.y1 : -size * 0.7, bottom = bb ? bb.y2 : 0;
     var cx = (x1 + x2) / 2, gap = size * 0.05, complete = true;
-    cps.slice(1).forEach(function (m) {
+    // glyph units (cap = 100) -> px, so the Font tool's numbers carry over
+    var capPx = fontRefLines(font).cap * size / font.unitsPerEm, unit = capPx / 100;
+    var lay = composeLayout(), clear = lay.clear * unit;
+    var obstacles = [cmdsToRings(bp.commands)];
+    var prev = null, prevBox = null;
+    cps.slice(1).forEach(function (m, idx, rest) {
       var mi = cmapIndex(font, m);
       if (!mi) { complete = false; return; }
       var mg = font.glyphs.get(mi);
-      var mb = pathBox(mg.getPath(0, 0, size));
+      var mcmds = mg.getPath(0, 0, size).commands;
+      var mb = cmdsBox(mcmds);
       if (!mb) return;
-      var mcx = (mb.x1 + mb.x2) / 2, dx, dy;
-      if (MARK_ABOVE.test(m)) {
+      var above = MARK_ABOVE.test(m);
+      // a circumflex or breve that carries a tone is squashed, like the Font tool does
+      if (above && (m === '\u0302' || m === '\u0306') && rest.slice(idx + 1).some(function (q) { return MARK_ABOVE.test(q); })) {
+        mcmds = squashCmds(mcmds, mb[3], lay.squash);
+        mb = cmdsBox(mcmds);
+      }
+      var mcx = (mb[0] + mb[2]) / 2, dx, dy, dir = 0;
+      var side = above && prev === '\u0302' && prevBox && BESIDE_CIRC[m];
+      if (side) {
+        // the tone's near edge tucks just over the circumflex's outer edge,
+        // its ink bottom part way up the circumflex: well clear of the apex
+        dx = side > 0 ? prevBox[2] - lay.tuck * unit - mb[0] : prevBox[0] + lay.tuck * unit - mb[2];
+        dy = prevBox[3] - (prevBox[3] - prevBox[1]) * lay.rise - mb[3];
+        dir = -1;
+      } else if (above) {
         dx = cx - mcx;
-        dy = Math.min(0, (top - gap) - mb.y2);     // lift only if it would cut in
-        top = Math.min(top, mb.y1 + dy);
+        dy = Math.min(0, (top - gap) - mb[3]);     // lift only if it would cut in
+        dir = -1;
       } else if (MARK_BELOW.test(m)) {
         dx = cx - mcx;
-        dy = Math.max(0, (bottom + gap) - mb.y1);
-        bottom = Math.max(bottom, mb.y2 + dy);
+        dy = Math.max(0, (bottom + gap) - mb[1]);
+        dir = 1;
       } else if (m === '\u031B') {                  // horn: hooks onto the top right
-        dx = x2 - mb.x1 - size * 0.06;
-        dy = (bb ? bb.y1 : top) - size * 0.04 - mb.y1;
+        dx = x2 - mb[0] - size * 0.06;
+        dy = (bb ? bb.y1 : top) - size * 0.04 - mb[1];
       } else if (m === '\u0335') {                  // short stroke: across the stem
         dx = x1 + (x2 - x1) * 0.3 - mcx;
-        dy = (bb ? (bb.y1 + bb.y2) / 2 : -size * 0.35) - (mb.y1 + mb.y2) / 2;
+        dy = (bb ? (bb.y1 + bb.y2) / 2 : -size * 0.35) - (mb[1] + mb[3]) / 2;
       } else {                                      // other overlays: centred, as drawn
         dx = cx - mcx; dy = 0;
       }
-      Array.prototype.push.apply(markCmds, mg.getPath(dx, dy, size).commands);
+      // floating marks keep LAYOUT.clear from the letter and every mark placed
+      // so far, nudged away (up for marks above, down for marks below)
+      var placed = shiftCmds(mcmds, dx, dy);
+      if (dir) {
+        for (var it = 0; it < 6; it++) {
+          var pr = cmdsToRings(placed), need = 0;
+          obstacles.forEach(function (o) {
+            var g = ringsGap(pr, o, clear + 1);
+            if (g < clear) need = Math.max(need, clear - g + 0.25 * unit);
+          });
+          if (!need) break;
+          dy += dir * need;
+          placed = shiftCmds(mcmds, dx, dy);
+        }
+        obstacles.push(cmdsToRings(placed));
+      }
+      var pb = cmdsBox(placed);
+      if (above && pb) { top = Math.min(top, pb[1]); prev = m; prevBox = pb; }
+      if (dir > 0 && pb) bottom = Math.max(bottom, pb[3]);
+      Array.prototype.push.apply(markCmds, placed);
     });
     return { base: bg, complete: complete };
   }
@@ -649,10 +865,73 @@
       else t = glyphTopU(font, b);
       if (t == null) t = b !== b.toUpperCase() ? L.xh : L.cap;
       line = Math.min(t, L.cap);
+    } else if (cps.length === 1 && ch !== ch.toUpperCase()) {
+      // A plain lowercase letter: ink wholly above its x-height can only be a
+      // dot (i, j, ĳ…) or a bar riding over an ascender (đ, ħ). Measured the
+      // way the composed ị is, so a plain i keeps its dot under Merge too
+      // (the dot is the smallest, most isolated ink: the blur ate it).
+      var dl = ch === 'i' || ch === 'j' ? glyphTopU(font, ch === 'i' ? '\u0131' : '\u0237') : null;
+      line = Math.min(dl || L.xh, L.cap);
     }
     L.markLine[ch] = line;
     return line;
   }
+  // Thinnest regular stroke of an uploaded font in font units: the H
+  // crossbar (a vertical run through its middle), else the I / l stem. The
+  // Đ bar and the Ơ/Ư horns are strokes of about that weight, so a Merge
+  // blur much wider than it rubs them out (see rowMelt).
+  function fontThinU(font) {
+    if (font._lfThin !== undefined) return font._lfThin;
+    var out = null;
+    try {
+      var S = 320, c = document.createElement('canvas');
+      c.width = S + 80; c.height = S + 80;
+      var ctx = c.getContext('2d', { willReadFrequently: true });
+      var run = function (ch, vertical) {
+        var gi = cmapIndex(font, ch);
+        if (!gi) return null;
+        var path = font.glyphs.get(gi).getPath(40, S, S);
+        var b = pathBox(path);
+        if (!b) return null;
+        ctx.clearRect(0, 0, c.width, c.height);
+        path.fill = '#000'; path.draw(ctx);
+        var data, i, best = 0, cur = 0;
+        if (vertical) {
+          var col = Math.round((b.x1 + b.x2) / 2);
+          data = ctx.getImageData(col, 0, 1, c.height).data;
+          for (i = 0; i < c.height; i++) {
+            if (data[i * 4 + 3] > 127) { cur++; if (cur > best) best = cur; } else cur = 0;
+          }
+        } else {
+          var rowY = Math.round((b.y1 + b.y2) / 2);
+          data = ctx.getImageData(0, rowY, c.width, 1).data;
+          for (i = 0; i < c.width; i++) {
+            if (data[i * 4 + 3] > 127) { cur++; if (cur > best) best = cur; } else cur = 0;
+          }
+        }
+        var u = best * font.unitsPerEm / S;
+        // anything outside a plausible stroke weight is a measuring miss
+        return u > font.unitsPerEm * 0.008 && u < font.unitsPerEm * 0.3 ? u : null;
+      };
+      out = run('H', true) || run('I', false) || run('l', false);
+    } catch (e) { out = null; }
+    font._lfThin = out;
+    return out;
+  }
+  // Merge blur actually used for a row. Uploaded fonts cap it at about half
+  // their thinnest stroke at the row's size: beyond that the blur no longer
+  // melts letters together, it erodes them (the Đ bar and the Ơ/Ư horns went
+  // first). The built-in Liquid letters are all fat strokes and keep the
+  // slider value as set.
+  var THIN_BLUR = 0.55;
+  function rowMelt(row) {
+    var m = state.melt;
+    if (state.fontSource !== 'upload' || !state.uploadedFont || !(m > 0)) return m;
+    var thin = fontThinU(state.uploadedFont);
+    if (!thin) return m;
+    return Math.min(m, Math.max(0.5, THIN_BLUR * thin * row.size / state.uploadedFont.unitsPerEm));
+  }
+
   // Cap height and baseline only mean "accent zone" in the cased alphabets; a
   // CJK ideograph's top stroke also clears the cap height, and is no accent.
   var CASED_SCRIPT = /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u;
@@ -1243,13 +1522,13 @@
         maskDpr = MAXPIX / Math.max(bw, bh);
       }
 
-      var blur = state.melt > 0;
+      var melt = rowMelt(rl.row), blur = melt > 0;
       var mask = rasterizeRow(rl, bounds, maskDpr, blur ? 'base' : undefined);
       var src = mask.canvas;
       if (blur) {
         var bc = document.createElement('canvas'); bc.width = mask.w; bc.height = mask.h;
         var bctx = bc.getContext('2d');
-        bctx.filter = 'blur(' + (state.melt * maskDpr) + 'px)';
+        bctx.filter = 'blur(' + (melt * maskDpr) + 'px)';
         bctx.drawImage(mask.canvas, 0, 0);
         bctx.filter = 'none';
         // accents skip the blur (see drawMarks)
@@ -1422,10 +1701,37 @@
     drawSmallBlocks(ctx);
     paintOverlay();
     updateRowWarnings();
+    updateEmptyState();
     $('stageMeta').textContent = W + ' × ' + H + ' px — ' +
       (state.fontSource === 'upload'
         ? (state.uploadedFontName || (restoredFontName ? 'upload ' + restoredFontName + ' again' : 'no font uploaded'))
         : linked() ? 'Font-tool glyphs' + (project.fontName ? ' (' + project.fontName + ')' : '') : 'Liquid (built-in)');
+  }
+
+  // Empty / edge states, drawn as HTML over the stage (never into the bitmap,
+  // so never into an export): no title rows, every row blank, or Upload
+  // picked with no font file loaded yet.
+  function updateEmptyState() {
+    var box = $('stageEmpty');
+    if (!box) return;
+    var kind = '', msg = '', btn = '';
+    if (state.fontSource === 'upload' && !state.uploadedFont) {
+      kind = 'upload';
+      msg = restoredFontName
+        ? 'Drop ' + restoredFontName + ' here again, or click Upload, to finish restoring this poster (font files aren\u2019t saved)'
+        : 'Drop a .ttf / .otf / .woff here, or click Upload';
+      btn = 'Upload\u2026';
+    } else if (!state.bigRows.length) {
+      kind = 'add'; msg = 'Add a title row to start'; btn = '+ Title row';
+    } else if (!state.bigRows.some(function (r) { return (r.text || '').trim(); })) {
+      kind = 'edit'; msg = 'Every title row is empty: type a title to start'; btn = 'Type in row 1';
+    }
+    box.hidden = !kind;
+    if (box._kind === kind + msg) return;
+    box._kind = kind + msg;
+    box.dataset.kind = kind;
+    $('stageEmptyMsg').textContent = msg;
+    $('stageEmptyBtn').textContent = btn;
   }
 
   // Rough, instant stand-in used while dragging: the raw silhouettes with no
@@ -1452,6 +1758,7 @@
     drawSmallBlocks(ctx);
     paintOverlay();
     updateRowWarnings();
+    updateEmptyState();
   }
 
   // Geometry of the selection widget, in poster units. Shared by the painter
@@ -1577,6 +1884,7 @@
       if (fkPrefix) btn.dataset.fk = fkPrefix + o[0];
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
+        checkpoint(groupName);
         row.querySelectorAll('.pill-btn').forEach(function (x) {
           x.classList.remove('active'); x.setAttribute('aria-pressed', 'false');
         });
@@ -1672,15 +1980,17 @@
       up.setAttribute('aria-label', 'Move ' + name.toLowerCase() + ' up');
       up.disabled = idx === 0;
       up.addEventListener('click', function (e) {
-        e.stopPropagation(); moveItem(state.bigRows, idx, -1);
+        e.stopPropagation();
+        checkpoint('Move ' + name.toLowerCase() + ' up');
+        moveItem(state.bigRows, idx, -1);
         keepFocus(renderBigRowCards); scheduleRender(true);
       });
       var del = fk(mk('button', 'icon-btn danger', '\u00d7'), pre + 'del');
       del.type = 'button'; del.title = 'Delete row';
       del.setAttribute('aria-label', 'Delete ' + name.toLowerCase());
-      del.disabled = state.bigRows.length <= 1;
       del.addEventListener('click', function (e) {
         e.stopPropagation();
+        checkpoint('Delete ' + name.toLowerCase());
         state.bigRows.splice(idx, 1);
         if (state.selected && state.selected.id === row.id) state.selected = null;
         renderBigRowCards(); scheduleRender(true);
@@ -1800,6 +2110,7 @@
       del.setAttribute('aria-label', 'Delete small text block ' + (idx + 1));
       del.addEventListener('click', function (e) {
         e.stopPropagation();
+        checkpoint('Delete small text ' + (idx + 1));
         state.smallBlocks.splice(idx, 1);
         if (state.selected && state.selected.id === b.id) state.selected = null;
         renderSmallBlockCards(); scheduleRender(false);
@@ -1865,6 +2176,7 @@
       matchBtn.title = 'Reset to the title ink colour';
       matchBtn.addEventListener('click', function (e) {
         e.stopPropagation();
+        checkpoint(name + ' colour');
         b.color = state.ink; ci.value = state.ink; scheduleRender(false);
       });
       colorRow.appendChild(matchBtn);
@@ -1914,6 +2226,7 @@
       btn.appendChild(chip);
       btn.appendChild(mk('div', 'pair-name', p.name));
       btn.addEventListener('click', function () {
+        checkpoint(p.name + ' colour pair');
         state.ink = p.ink; state.bg = p.bg; state.bgTransparent = false;
         $('inkColor').value = p.ink; $('bgColor').value = p.bg;
         $('bgTransparent').checked = false;
@@ -1934,6 +2247,7 @@
           sw.setAttribute('aria-label', (key === 'ink' ? 'Title ink ' : 'Background ') + c);
           sw.setAttribute('aria-pressed', on ? 'true' : 'false');
           sw.addEventListener('click', function () {
+            checkpoint(key === 'ink' ? 'Title ink' : 'Background');
             state[key] = c;
             $(key === 'ink' ? 'inkColor' : 'bgColor').value = c;
             if (key === 'bg') { state.bgTransparent = false; $('bgTransparent').checked = false; }
@@ -2070,6 +2384,11 @@
     window.addEventListener('mousemove', function (ev) {
       if (drag) {
         var p = canvasPoint(ev);
+        if (!drag.moved) {
+          drag.moved = true;
+          var who = drag.mode === 'move' ? itemName(drag.hit.type, drag.hit.id) : itemName('row', drag.row.id);
+          checkpoint((drag.mode === 'move' ? 'Move ' : drag.mode === 'resize' ? 'Resize ' : 'Rotate ') + who);
+        }
         if (drag.mode === 'move') {
           drag.hit.item.xp = drag.origXp + (p.x - drag.startX) / state.canvasW * 100;
           drag.hit.item.yp = drag.origYp + (p.y - drag.startY) / state.canvasH * 100;
@@ -2116,6 +2435,15 @@
       if (!item) return;
       var isRow = state.selected.type === 'row';
       var step = ev.shiftKey ? 1 : 0.15, moved = true;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      var turn = isRow && (ev.key === '[' || ev.key === ']');
+      if (!turn && !/^Arrow(Left|Right|Up|Down)$/.test(ev.key)) return;
+      // a run of presses (key repeat included) is one undo step
+      var nkey = (turn ? 'turn:' : 'nudge:') + state.selected.type + item.id;
+      if (nudge.key !== nkey) checkpoint((turn ? 'Rotate ' : 'Nudge ') + itemName(state.selected.type, item.id));
+      nudge.key = nkey;
+      clearTimeout(nudge.timer);
+      nudge.timer = setTimeout(function () { nudge.key = ''; }, 700);
       if (ev.key === 'ArrowLeft') item.xp -= step;
       else if (ev.key === 'ArrowRight') item.xp += step;
       else if (ev.key === 'ArrowUp') item.yp -= step;
@@ -2151,6 +2479,7 @@
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.addEventListener('click', function () {
+        checkpoint(row.getAttribute('aria-label') || '');
         cells.forEach(function (b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
         btn.classList.add('active');
         btn.setAttribute('aria-pressed', 'true');
@@ -2334,7 +2663,9 @@
     var out = {};
     if (Array.isArray(p.rows)) {
       var rows = p.rows.slice(0, 24).map(validRow).filter(Boolean);
-      if (rows.length) out.rows = rows;          // a poster always keeps at least one title row
+      // an emptied poster comes back empty (the stage prompts for a row); a
+      // list whose every row was unreadable falls back to the stock rows
+      if (rows.length || !p.rows.length) out.rows = rows;
     }
     // no small text at all is a legitimate choice
     if (Array.isArray(p.blocks)) out.blocks = p.blocks.slice(0, 40).map(validBlock).filter(Boolean);
@@ -2406,6 +2737,7 @@
   // Saves settle for a moment: a slider drag or a burst of typing is one write.
   var persistTimer = null, persistReady = false;
   function schedulePersist() {
+    commitStep();                         // every edit passes through here: keep its undo step
     if (!persistReady) return;            // nothing is written until boot has finished
     clearTimeout(persistTimer);
     persistTimer = setTimeout(savePoster, 400);
@@ -2416,6 +2748,206 @@
     catch (e) { /* full, blocked or private mode: the poster still works, it just won't come back */ }
   }
   function flushPersist() { if (persistTimer) savePoster(); }
+
+  // ---------------------------------------------------------------- history
+  // Undo / redo over exactly what the autosave stores (rows, small text,
+  // poster size and colours, typeface and its shape, merge settings). A
+  // snapshot is taken at the START of each gesture: a slider drag, a pick, a
+  // burst of typing, a canvas drag, a run of arrow-key nudges, Reset... It is
+  // only kept once that gesture really changes something (commitStep runs on
+  // every edit via schedulePersist), so clicking the pill that is already on,
+  // or a press on the canvas that never moves, leaves no empty step behind.
+  var HISTORY_MAX = 80;
+  var undoStack = [], redoStack = [];
+  var pendingStep = null;     // { s, sel, label } from the gesture in progress
+  var restoring = false;
+  var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+
+  // while the Font tool's shape is mirrored, the user's own one is parked in link.saved
+  function userGlyph() { return linked() && link.shape && link.saved ? link.saved.glyph : state.glyph; }
+  function snapshotState() {
+    return JSON.stringify({
+      rows: state.bigRows, blocks: state.smallBlocks,
+      fontSource: state.fontSource,
+      glyph: pickKeys(userGlyph(), ['preset'].concat(SHAPE_KEYS)),
+      link: [link.use, link.shape],
+      seed: state.seed,
+      merge: pickKeys(state, Object.keys(MERGE_NUM)),
+      canvas: [state.canvasPreset, state.canvasW, state.canvasH],
+      palette: [state.ink, state.bg, state.bgTransparent],
+      restoredFontName: restoredFontName,
+    });
+  }
+  function selCopy() { return state.selected ? { type: state.selected.type, id: state.selected.id } : null; }
+  function selExists(sel) { return !!sel && !!(sel.type === 'row' ? findRow(sel.id) : findBlock(sel.id)); }
+  function itemName(type, id) {
+    var list = type === 'row' ? state.bigRows : state.smallBlocks;
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return (type === 'row' ? 'row ' : 'text ') + (i + 1);
+    return type === 'row' ? 'row' : 'text';
+  }
+
+  // Mark the start of a gesture. `label` names it in the Undo tooltip / toast.
+  function checkpoint(label) {
+    if (restoring || !persistReady) return;
+    commitStep();               // a previous gesture still settling (an async font load) keeps its own step
+    pendingStep = { s: snapshotState(), sel: selCopy(), label: label || '' };
+  }
+  function commitStep() {
+    if (!pendingStep || restoring) return;
+    if (snapshotState() === pendingStep.s) return;
+    undoStack.push(pendingStep);
+    if (undoStack.length > HISTORY_MAX) undoStack.shift();
+    redoStack.length = 0;
+    pendingStep = null;
+    updateHistoryUI();
+  }
+
+  // Gesture state for the coalescing rules: one step per typing burst, per
+  // slider drag (first 'input' after a 'change'), per run of nudges.
+  var typing = { el: null, timer: null }, nudge = { key: '', timer: null };
+  function endBursts() {
+    clearTimeout(typing.timer); typing.el = null;
+    clearTimeout(nudge.timer); nudge.key = '';
+  }
+
+  function undo() { return stepHistory(undoStack, redoStack, 'Undo'); }
+  function redo() { return stepHistory(redoStack, undoStack, 'Redo'); }
+  function stepHistory(from, to, verb) {
+    commitStep();
+    pendingStep = null;
+    endBursts();
+    var cur = snapshotState(), entry;
+    // skip anything identical to what is on screen (nothing to see change)
+    while ((entry = from.pop()) && entry.s === cur) { /* drop it */ }
+    if (!entry) { updateHistoryUI(); return false; }
+    to.push({ s: cur, sel: selCopy(), label: entry.label });
+    restoreSnapshot(entry);
+    updateHistoryUI();
+    toast(verb + (entry.label ? ': ' + entry.label : ''), 1600);
+    return true;
+  }
+
+  function restoreSnapshot(entry) {
+    var c = JSON.parse(entry.s);
+    var active = document.activeElement;
+    var fromList = active && active.closest ? active.closest('.card-list') : null;
+    restoring = true;
+    try {
+      // fresh objects (ids kept, so selection and focus keys still match)
+      state.bigRows = c.rows.map(function (r) { return makeRow(r); });
+      state.smallBlocks = c.blocks.map(function (b) { return makeBlock(b); });
+      state.fontSource = c.fontSource;
+      state.seed = c.seed;
+      Object.keys(c.merge).forEach(function (k) { state[k] = c.merge[k]; });
+      var resized = state.canvasW !== c.canvas[1] || state.canvasH !== c.canvas[2];
+      state.canvasPreset = c.canvas[0]; state.canvasW = c.canvas[1]; state.canvasH = c.canvas[2];
+      state.ink = c.palette[0]; state.bg = c.palette[1]; state.bgTransparent = c.palette[2];
+      // the font FILE is never part of history: a loaded one stays loaded
+      restoredFontName = state.uploadedFont ? '' : c.restoredFontName;
+
+      var glyphNow = JSON.stringify([pickKeys(userGlyph(), ['preset'].concat(SHAPE_KEYS)), link.use, link.shape]);
+      if (glyphNow !== JSON.stringify([c.glyph, c.link[0], c.link[1]])) {
+        // hand back a mirrored Font-tool shape first, so what gets parked
+        // again below is the user's own spacing, not the project's
+        if (link.saved) {
+          if (GC && link.saved.layout) Object.keys(link.saved.layout).forEach(function (k) { GC.LAYOUT[k] = link.saved.layout[k]; });
+          link.saved = null;
+        }
+        state.glyph = copyObj(c.glyph);
+        link.use = c.link[0]; link.shape = c.link[1];
+        applyLinkShape(); updateProjectUI();
+      }
+
+      // selection: what was selected at that step, else what is selected now
+      state.selected = selExists(entry.sel) ? entry.sel : selExists(state.selected) ? selCopy() : null;
+      syncControls();
+      keepFocus(function () { renderPalette(); renderBigRowCards(); renderSmallBlockCards(); });
+      // the focused card control went away with its row: land somewhere sane
+      if (fromList && (!document.activeElement || document.activeElement === document.body)) {
+        $(fromList.id === 'bigRowList' ? 'btnAddBigRow' : 'btnAddSmallBlock').focus({ preventScroll: true });
+      }
+      state.smallBlocks.forEach(function (b) { loadFontThen(b, function () { paint(cachedContour); }); });
+      if (resized) zoomToFit();
+      scheduleRender(true);
+    } finally {
+      restoring = false;
+    }
+  }
+
+  function updateHistoryUI() {
+    histButton($('btnUndo'), undoStack, 'Undo', IS_MAC ? '\u2318Z' : 'Ctrl+Z');
+    histButton($('btnRedo'), redoStack, 'Redo', IS_MAC ? '\u21e7\u2318Z' : 'Ctrl+Y');
+  }
+  function histButton(btn, stack, verb, keys) {
+    if (!btn) return;
+    var top = stack[stack.length - 1];
+    btn.setAttribute('aria-disabled', top ? 'false' : 'true');
+    btn.title = top ? verb + (top.label ? ' ' + top.label : '') + ' (' + keys + ')' : 'Nothing to ' + verb.toLowerCase();
+  }
+
+  // Text you type into keeps the browser's own undo while it has focus.
+  function isTextEntry(el) {
+    if (!el || !el.tagName) return false;
+    if (el.isContentEditable) return true;
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'textarea') return true;
+    return tag === 'input' && /^(text|search|email|url|tel|password|number)$/.test(el.type);
+  }
+  function labelText(l) {
+    var c = l.cloneNode(true);
+    c.querySelectorAll('b, input, select, textarea').forEach(function (x) { x.remove(); });
+    return c.textContent.replace(/\s+/g, ' ').trim();
+  }
+  function controlName(el) {
+    var n = el.getAttribute('aria-label');
+    if (!n && el.id) {
+      var l = document.querySelector('label[for="' + el.id + '"]');
+      if (l) n = labelText(l);
+    }
+    if (!n && el.closest('label')) n = labelText(el.closest('label'));
+    return (n || '').trim();
+  }
+
+  function initHistory() {
+    // Sidebar controls, caught in the capture phase, i.e. before their own
+    // handlers have touched the state.
+    var side = document.querySelector('.poster-sidebar');
+    side.addEventListener('input', function (ev) {
+      var el = ev.target;
+      if (el.type === 'file') return;
+      if (isTextEntry(el)) {
+        if (typing.el !== el) checkpoint(controlName(el));
+        typing.el = el;
+        clearTimeout(typing.timer);
+        typing.timer = setTimeout(function () { typing.el = null; }, 900);
+      } else if (el.type === 'range' || el.type === 'color') {
+        if (!el._gesture) { el._gesture = true; checkpoint(controlName(el)); }
+      }
+    }, true);
+    side.addEventListener('change', function (ev) {
+      var el = ev.target;
+      if (el.type === 'file') return;
+      if (el.type === 'range' || el.type === 'color') { el._gesture = false; return; }
+      if (isTextEntry(el)) { if (typing.el === el) typing.el = null; return; }
+      checkpoint(controlName(el));          // selects and checkboxes: one step each
+    }, true);
+    side.addEventListener('focusout', function (ev) { if (typing.el === ev.target) typing.el = null; }, true);
+
+    $('btnUndo').addEventListener('click', function () { if (this.getAttribute('aria-disabled') !== 'true') undo(); });
+    $('btnRedo').addEventListener('click', function () { if (this.getAttribute('aria-disabled') !== 'true') redo(); });
+
+    window.addEventListener('keydown', function (ev) {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+      var k = (ev.key || '').toLowerCase();
+      if (k !== 'z' && k !== 'y') return;
+      // native undo inside text fields; ranges, selects and buttons don't block it
+      if (isTextEntry(ev.target)) return;
+      if (document.querySelector('dialog[open]')) return;
+      ev.preventDefault();
+      if (k === 'y' || ev.shiftKey) redo(); else undo();
+    });
+    updateHistoryUI();
+  }
 
   // Every sidebar control that mirrors state, refreshed from it in one go
   // (boot after a restore, and Reset poster).
@@ -2486,7 +3018,7 @@
     zoomToFit();
     scheduleRender(true);
     clearTimeout(persistTimer); persistTimer = null;   // a reset poster is the stock one: nothing to store
-    toast('Poster reset to the starting layout');
+    toast('Poster reset to the starting layout. ' + (IS_MAC ? '\u2318Z' : 'Ctrl+Z') + ' or Undo brings it back', 3600);
   }
 
   function applyCanvasSize(w, h) {
@@ -2520,6 +3052,39 @@
       if (e.dataTransfer.files[0]) loadFontFile(e.dataTransfer.files[0]);
     });
     fileInput.addEventListener('change', function (e) { if (e.target.files[0]) loadFontFile(e.target.files[0]); });
+
+    // With Upload picked, the whole stage takes a dropped font file too: that
+    // is where the empty-state prompt asks for it.
+    var stageView = $('stageView');
+    var dragDepth = 0;
+    function fileDrag(e) {
+      return state.fontSource === 'upload' && e.dataTransfer &&
+        Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+    }
+    stageView.addEventListener('dragenter', function (e) {
+      if (!fileDrag(e)) return;
+      e.preventDefault(); dragDepth++; stageView.classList.add('drop-ready');
+    });
+    stageView.addEventListener('dragover', function (e) { if (fileDrag(e)) e.preventDefault(); });
+    stageView.addEventListener('dragleave', function () {
+      if (--dragDepth <= 0) { dragDepth = 0; stageView.classList.remove('drop-ready'); }
+    });
+    stageView.addEventListener('drop', function (e) {
+      dragDepth = 0; stageView.classList.remove('drop-ready');
+      if (!fileDrag(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer.files[0]) loadFontFile(e.dataTransfer.files[0]);
+    });
+    $('stageEmptyBtn').addEventListener('click', function () {
+      var kind = $('stageEmpty').dataset.kind;
+      if (kind === 'upload') fileInput.click();
+      else if (kind === 'add') $('btnAddBigRow').click();
+      else if (kind === 'edit' && state.bigRows[0]) {
+        select('row', state.bigRows[0].id);
+        var t = document.querySelector('[data-fk="row-' + state.bigRows[0].id + '-text"]');
+        if (t) { t.focus(); t.scrollIntoView({ block: 'nearest' }); }
+      }
+    });
 
     function loadFontFile(file) {
       var reader = new FileReader();
@@ -2588,6 +3153,7 @@
     renderBigRowCards();
     renderSmallBlockCards();
     $('btnAddBigRow').addEventListener('click', function () {
+      checkpoint('Add title row');
       // inherit the last row's look so a new line joins the composition
       // instead of arriving with unrelated settings
       var last = state.bigRows[state.bigRows.length - 1] || {};
@@ -2613,10 +3179,11 @@
       renderBigRowCards(); scheduleRender(true);
     });
     $('btnAddSmallBlock').addEventListener('click', function () {
+      checkpoint('Add small text');
       var last = state.smallBlocks[state.smallBlocks.length - 1] || {};
       var b = makeBlock({
         font: last.font || "'JetBrains Mono'",
-        size: last.size || 15, lh: last.lh || 145,
+        size: last.size || 30, lh: last.lh || 130,
         color: last.color || state.ink,
       });
       state.smallBlocks.push(b);
@@ -2633,6 +3200,7 @@
     bindRange('strokeWidth', 'valStroke', function () { return state.strokeWidth; }, function (v) { state.strokeWidth = v; }, function (v) { return v.toFixed(2) + 'px'; }, false);
     $('valSeed').textContent = '#' + state.seed;
     $('btnReseed').addEventListener('click', function () {
+      checkpoint('Restir');
       state.seed = Math.floor(Math.random() * 9999);
       $('valSeed').textContent = '#' + state.seed;
       scheduleRender(true);
@@ -2670,6 +3238,7 @@
     $('btnZoom100').addEventListener('click', function () { setZoom(1); });
 
     initCanvasInteraction();
+    initHistory();
 
     // -- export
     $('btnExportPng').addEventListener('click', exportPng);
@@ -2690,10 +3259,26 @@
         return;
       }
       disarmReset();
+      checkpoint('Reset poster');
       resetPoster();
     });
     resetBtn.addEventListener('blur', disarmReset);
     window.addEventListener('pagehide', flushPersist);
+    // Narrow layout: the export bar is pinned over the bottom of the page, so
+    // a control that takes focus underneath it is scrolled clear (browsers
+    // only promise "into view", which the pinned bar may still cover).
+    document.addEventListener('focusin', function (ev) {
+      var bar = document.querySelector('.control-bar'), t = ev.target;
+      if (!bar || !t || !t.getBoundingClientRect || bar.contains(t)) return;
+      if (getComputedStyle(bar).position !== 'sticky') return;
+      requestAnimationFrame(function () {
+        var r = t.getBoundingClientRect(), top = bar.getBoundingClientRect().top;
+        if (!r.height || r.bottom <= top - 8) return;
+        // clear the bar, but never push the control's own top off screen
+        var dy = Math.min(r.bottom - top + 16, r.top - 8);
+        if (dy > 0) window.scrollBy(0, dy);
+      });
+    });
     document.addEventListener('visibilitychange', function () { if (document.hidden) flushPersist(); });
 
     // -- boot
@@ -2728,20 +3313,40 @@
     return c;
   }
 
+  // Browsers refuse canvases past ~16k px a side or ~268M px in all (and
+  // then hand toBlob a null): keep a PNG export inside both.
+  var PNG_MAX_SIDE = 16384, PNG_MAX_AREA = 2.6e8;
+  function pngScaleFor(W, H, want) {
+    var max = Math.min(Math.sqrt(PNG_MAX_AREA / (W * H)), PNG_MAX_SIDE / W, PNG_MAX_SIDE / H);
+    return want <= max ? want : Math.floor(max * 100) / 100;
+  }
   function exportPng() {
-    var scale = parseFloat($('exportScale').value) || 2;
-    $('stageLoading').classList.add('show');
+    var want = parseFloat($('exportScale').value) || 2;
+    var scale = pngScaleFor(state.canvasW, state.canvasH, want);
+    var loading = $('stageLoading');
+    var done = function (msg, ms) { loading.classList.remove('show'); toast(msg, ms); };
+    loading.classList.add('show');
     setTimeout(function () {
       try {
         var res = computeContour(true);
         renderToCanvas(res, scale).toBlob(function (blob) {
-          dl(blob, safeName() + '.png');
-          $('stageLoading').classList.remove('show');
-          toast('PNG exported');
+          try {
+            if (!blob) {
+              done('PNG export failed: the browser could not encode a ' +
+                Math.round(state.canvasW * scale) + ' \u00d7 ' + Math.round(state.canvasH * scale) +
+                ' px image. Try a lower export scale or SVG.', 5000);
+              return;
+            }
+            dl(blob, safeName() + '.png');
+            done(scale < want
+              ? 'PNG exported at ' + scale + '\u00d7 (reduced from ' + want + '\u00d7: the browser\u2019s image size limit)'
+              : 'PNG exported', scale < want ? 4200 : 2200);
+          } catch (err) {
+            console.error(err); done('PNG export failed: ' + err.message, 4000);
+          }
         });
       } catch (err) {
-        console.error(err); toast('PNG export failed: ' + err.message, 3500);
-        $('stageLoading').classList.remove('show');
+        console.error(err); done('PNG export failed: ' + err.message, 3500);
       }
     }, 30);
   }

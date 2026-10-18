@@ -523,12 +523,12 @@ select {
         <div class="node-inspector metrics-row pair-row" role="group" aria-label="Kerning pair">
           <div class="node-field pair-glyph">
             <label for="pairLeft">Pair</label>
-            <input type="text" id="pairLeft" maxlength="2" value="A" spellcheck="false" autocomplete="off" />
+            <input type="text" id="pairLeft" maxlength="6" value="A" spellcheck="false" autocomplete="off" />
           </div>
           <div class="node-field pair-glyph">
             <label for="pairRight" class="visually-hidden">Second glyph</label>
             <span class="pair-spacer" aria-hidden="true">&nbsp;</span>
-            <input type="text" id="pairRight" maxlength="2" value="V" spellcheck="false" autocomplete="off" />
+            <input type="text" id="pairRight" maxlength="6" value="V" spellcheck="false" autocomplete="off" />
           </div>
           <div class="node-field">
             <label for="pairKern">Kern</label>
@@ -1319,6 +1319,32 @@ select {
     return out.length >= 6 ? out : ring;
   }
 
+  // For curve output: fewer, longer segments. Points at horizontal and
+  // vertical extremes are always kept (fonts want nodes there, and hinting
+  // and rasterisers like them), Douglas-Peucker thins the rest between them;
+  // ringToCubics then puts a smooth curve back through what is left.
+  function simplifyForCurves(ring, tol) {
+    var n = ring.length, i;
+    if (n < 8) return ring;
+    var keep = new Array(n).fill(false), idx = [];
+    for (i = 0; i < n; i++) {
+      var a = ring[(i + n - 1) % n], p = ring[i], b = ring[(i + 1) % n];
+      if ((p[0] - a[0]) * (b[0] - p[0]) < 0 || (p[1] - a[1]) * (b[1] - p[1]) < 0) { keep[i] = true; idx.push(i); }
+    }
+    if (idx.length < 2) return decimateRing(ring, tol);
+    for (var k = 0; k < idx.length; k++) {
+      var f = idx[k], l = idx[(k + 1) % idx.length], seg = [];
+      for (var j = f; ; j = (j + 1) % n) { seg.push(ring[j]); if (j === l) break; }
+      var sk = new Array(seg.length).fill(false);
+      sk[0] = true; sk[seg.length - 1] = true;
+      dpChain(seg, 0, seg.length - 1, tol, sk);
+      for (var m = 1; m < seg.length - 1; m++) if (sk[m]) keep[(f + m) % n] = true;
+    }
+    var out = [];
+    for (i = 0; i < n; i++) if (keep[i]) out.push(ring[i]);
+    return out.length >= 4 ? out : ring;
+  }
+
   // ------------------------------------------------------------ orientation
   function signedArea(r) {
     var a = 0;
@@ -1449,6 +1475,7 @@ select {
   return {
     PRESETS: PRESETS,
     ringToCubics: ringToCubics,
+    simplifyForCurves: simplifyForCurves,
     glyphRings: glyphRings,
     signedArea: signedArea,
     traceField: traceField,
@@ -1484,9 +1511,10 @@ select {
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var GRAVE = '̀', ACUTE = '́', CIRC = '̂', TILDE = '̃',
-      BREVE = '̆', HOOK = '̉', HORN = '̛', DOT = '̣',
-      BAR = '̵';
+  var GRAVE = '\u0300', ACUTE = '\u0301', CIRC = '\u0302', TILDE = '\u0303',
+      BREVE = '\u0306', HOOK = '\u0309', HORN = '\u031B', DOT = '\u0323',
+      BAR = '\u0335', DIAER = '\u0308', RING = '\u030A', CARON = '\u030C',
+      CEDIL = '\u0327', OGON = '\u0328', DOTA = '\u0307', MACRON = '\u0304';
 
   var MARKS = {};
   MARKS[ACUTE] = { zone: 'top', name: 'Acute', vi: 'sắc' };
@@ -1498,7 +1526,19 @@ select {
   MARKS[BREVE] = { zone: 'top', name: 'Breve', vi: 'trăng' };
   MARKS[HORN]  = { zone: 'fused', name: 'Horn', vi: 'móc' };
   MARKS[BAR]   = { zone: 'fused', name: 'Stroke', vi: 'gạch' };
-  var MARK_ORDER = [ACUTE, GRAVE, HOOK, TILDE, DOT, CIRC, BREVE, HORN, BAR];
+  // beyond Vietnamese: the marks that unlock most other Latin capitals
+  MARKS[DIAER] = { zone: 'top', name: 'Diaeresis', vi: 'hai chấm' };
+  MARKS[RING]  = { zone: 'top', name: 'Ring above', vi: 'khuyên' };
+  MARKS[CARON] = { zone: 'top', name: 'Caron', vi: 'mũ ngược' };
+  MARKS[DOTA]  = { zone: 'top', name: 'Dot above', vi: 'chấm trên' };
+  MARKS[MACRON] = { zone: 'top', name: 'Macron', vi: 'gạch trên' };
+  MARKS[CEDIL] = { zone: 'bottom', name: 'Cedilla', vi: 'móc dưới' };
+  MARKS[OGON]  = { zone: 'bottom', name: 'Ogonek', vi: 'đuôi' };
+  var MARK_ORDER = [ACUTE, GRAVE, HOOK, TILDE, DOT, CIRC, BREVE, HORN, BAR, DIAER, RING, CARON, DOTA, MACRON, CEDIL, OGON];
+  // cedilla and ogonek hang right off the foot instead of a gap below it,
+  // and the ogonek sits at the right foot rather than the centre
+  var TIGHT_BOTTOM = {}; TIGHT_BOTTOM[CEDIL] = 1; TIGHT_BOTTOM[OGON] = 1;
+  var RIGHT_FOOT = {}; RIGHT_FOOT[OGON] = 1;
 
   // letters NFD does not split
   var EXTRA = { 'Đ': 'D' + BAR };
@@ -1531,6 +1571,23 @@ select {
 
   var VIET_BASES = ['A', 'Ă', 'Â', 'E', 'Ê', 'I', 'O', 'Ô', 'Ơ', 'U', 'Ư', 'Y'];
   var TONES = ['', ACUTE, GRAVE, HOOK, TILDE, DOT];
+
+  // Every precomposed Latin capital (Latin-1, Extended-A, Extended
+  // Additional) whose decomposition this set of marks can build, minus the
+  // Vietnamese ones — computed, so adding a mark skeleton adds its letters.
+  function latinUpper(has) {
+    var out = [], viet = {};
+    vietnameseUpper().forEach(function (v) { viet[v] = 1; });
+    [[0xC0, 0x17F], [0x1E00, 0x1EFF]].forEach(function (r) {
+      for (var cp = r[0]; cp <= r[1]; cp++) {
+        var c = String.fromCodePoint(cp);
+        if (viet[c] || c.toUpperCase() !== c || c.toLowerCase() === c) continue;
+        var p = plan(c, has);
+        if (p && !p.simple) out.push(c);
+      }
+    });
+    return out;
+  }
 
   // All 67 uppercase Vietnamese letters outside ASCII, grouped by vowel.
   function vietnameseUpper() {
@@ -1667,7 +1724,15 @@ select {
     function pts(R) { var o = []; R.forEach(function (r) { r.forEach(function (q) { if (inBox(q)) o.push(q); }); }); return o; }
     function edges(R) {
       var o = [];
-      R.forEach(function (r) { for (var k = 0; k < r.length; k++) { var a = r[k], b = r[(k + 1) % r.length]; if (inBox(a) || inBox(b)) o.push([a, b]); } });
+      // an edge counts if its own box crosses the overlap box — a long flat
+      // edge (the foot of an E) can pass under a mark with both ends outside
+      R.forEach(function (r) {
+        for (var k = 0; k < r.length; k++) {
+          var a = r[k], b = r[(k + 1) % r.length];
+          if (Math.max(a[0], b[0]) >= bx[0] && Math.min(a[0], b[0]) <= bx[2] &&
+              Math.max(a[1], b[1]) >= bx[1] && Math.min(a[1], b[1]) <= bx[3]) o.push([a, b]);
+        }
+      });
       return o;
     }
     var best = Infinity;
@@ -1762,9 +1827,13 @@ select {
     p.bottom.forEach(function (m) {
       var mr = api.rings(m), mb = bbox(mr);
       if (!mb) return;
-      var st = settle(mr, ax, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
+      var bx2 = RIGHT_FOOT[m] ? pb[2] - (mb[2] - mb[0]) * 0.6 : ax, st;
+      if (TIGHT_BOTTOM[m]) {   // overlaps the foot slightly, so it reads attached
+        var oy0 = bb[3] - LAYOUT.clear - mb[1];
+        st = { oy: oy0, placed: shift(mr, bx2, oy0) };
+      } else st = settle(mr, bx2, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
       out = out.concat(st.placed);
-      parts.push({ key: m, ox: ax, oy: st.oy, zone: 'bottom' });
+      parts.push({ key: m, ox: bx2, oy: st.oy, zone: 'bottom' });
       bottom = bbox(st.placed)[3];
     });
 
@@ -1788,6 +1857,7 @@ select {
     shift: shift,
     shiftChains: shiftChains,
     vietnameseUpper: vietnameseUpper,
+    latinUpper: latinUpper,
   };
 });
 
@@ -1801,9 +1871,11 @@ select {
 // or mark positioning. This module builds the missing pieces as raw bytes and
 // splices them into the ArrayBuffer that font.toArrayBuffer() produced:
 //
-//   gpos({kern, marks})      -> GPOS table bytes: 'kern' (PairPos Format 1,
-//                               XAdvance only) and/or 'mark' (MarkBasePos
-//                               Format 1). gposKern(pairs) = kern only.
+//   gpos({kern, marks})      -> GPOS table bytes: 'kern' (PairPos Format 1
+//                               glyph pairs, or Format 2 class kerning for
+//                               big sets; XAdvance only) and/or 'mark'
+//                               (MarkBasePos Format 1). gposKern(pairs) =
+//                               kern only.
 //   gdef(classDefs)          -> GDEF table bytes with a GlyphClassDef, so
 //                               shapers know which glyphs are marks.
 //   injectTables(buf, tabs)  -> new sfnt with tables added / replaced / removed,
@@ -1852,35 +1924,9 @@ select {
     return a;
   }
 
-  // ---------------------------------------------------------- kern lookup
-  // pairs: [[leftGid, rightGid, xAdvanceAdjust], ...] in font units.
-  // Duplicates: the last entry for a pair wins; pairs whose final value is 0
-  // are dropped. Returns the lookup bytes, or null when nothing is left.
-  //
-  // First glyphs are split so no PairPos subtable passes maxSub bytes. The
-  // Lookup's own subtable offsets are 16-bit too, so once the subtables
-  // together pass 64K the lookup is written as type 9 (Extension, 32-bit
-  // offsets) wrapping type-2 subtables. That only kicks in beyond roughly
-  // 15000 pairs; note opentype.js 1.3.4 cannot read Extension lookups
-  // (HarfBuzz, browsers and fontTools can).
-  function kernLookup(pairs, flag, maxSub) {
-    var last = {}, sets = {}, firsts = [], i, k;
-    for (i = 0; i < (pairs || []).length; i++) {
-      var p = pairs[i];
-      last[(p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF)] = i16(p[2]);
-    }
-    for (k in last) {
-      if (!last[k]) continue;
-      var l = Math.floor(k / 65536);
-      if (!sets[l]) { sets[l] = []; firsts.push(l); }
-      sets[l].push([k % 65536, last[k]]);
-    }
-    if (!firsts.length) return null;
-    firsts.sort(byNum);
-    for (i = 0; i < firsts.length; i++) sets[firsts[i]].sort(function (a, b) { return a[0] - b[0]; });
-
-    // greedy split of the (sorted) first-glyph list into subtables
-    var groups = [], cur = [], recs = 0;
+  // greedy split of the (sorted) first-glyph list into Format 1 subtables
+  function pairSubtables(sets, firsts, maxSub) {
+    var groups = [], cur = [], recs = 0, i;
     for (i = 0; i < firsts.length; i++) {
       var r = sets[firsts[i]].length;
       if (cur.length && pairPosSize(cur.length + 1, recs + r) > maxSub) {
@@ -1891,7 +1937,226 @@ select {
     groups.push(cur);
     var subs = [];
     for (i = 0; i < groups.length; i++) subs.push(pairPos(groups[i], sets));
+    return subs;
+  }
 
+  // ------------------------------------------------- Coverage / ClassDef
+  // The smaller encoding of each. Coverage: format 1 (glyph list) or 2
+  // (ranges of consecutive gids). ClassDef: format 1 (one class per gid from
+  // the first listed gid to the last) or 2 (runs of consecutive gids that
+  // share a class). Class 0 is implicit and never written.
+  function runs(gids, classOf) {               // gids sorted ascending
+    var out = [], i;
+    for (i = 0; i < gids.length; i++) {
+      var r = out[out.length - 1], c = classOf(gids[i]);
+      if (r && r[1] === gids[i] - 1 && r[2] === c) r[1] = gids[i];
+      else out.push([gids[i], gids[i], c]);
+    }
+    return out;
+  }
+
+  function coverageBest(gids) {
+    var rs = runs(gids, function () { return 0; }), a = [], i, idx = 0;
+    if (6 * rs.length >= 2 * gids.length) return coverage(gids);
+    u16(a, 2); u16(a, rs.length);
+    for (i = 0; i < rs.length; i++) {
+      u16(a, rs[i][0]); u16(a, rs[i][1]); u16(a, idx); idx += rs[i][1] - rs[i][0] + 1;
+    }
+    return a;
+  }
+
+  function classDef(cls) {                     // { gid: class > 0 }
+    var g = sortedKeys(cls), rs = runs(g, function (x) { return cls[x]; }), a = [], i;
+    var span = g.length ? g[g.length - 1] - g[0] + 1 : 0;
+    if (g.length && 6 + 2 * span < 4 + 6 * rs.length) {
+      u16(a, 1); u16(a, g[0]); u16(a, span);
+      for (i = 0; i < span; i++) u16(a, cls[g[0] + i] || 0);
+    } else {
+      u16(a, 2); u16(a, rs.length);
+      for (i = 0; i < rs.length; i++) { u16(a, rs[i][0]); u16(a, rs[i][1]); u16(a, rs[i][2]); }
+    }
+    return a;
+  }
+
+  // ------------------------------------------------ class kerning (fmt 2)
+  // Values are first rounded to multiples of q (half away from zero, so
+  // the error is at most floor(q / 2): 1 unit for the default q = 2), which
+  // lets rows / columns that differ only by rounding noise share a class.
+  function quantise(v, q) {
+    if (!(q > 1) || !v) return v;
+    var r = (v < 0 ? -1 : 1) * Math.round(Math.abs(v) / q) * q;
+    return Math.max(-32768, Math.min(32767, r));
+  }
+
+  // Partition refinement: lab[g] for g in gs is replaced by a dense id of
+  // (old label, value in row m). Returns the number of distinct ids.
+  function refine(gs, lab, m) {
+    var ids = {}, n = 0, i;
+    for (i = 0; i < gs.length; i++) {
+      var k = lab[gs[i]] + ':' + (m[gs[i]] || 0);
+      lab[gs[i]] = k in ids ? ids[k] : (ids[k] = n++);
+    }
+    return n;
+  }
+
+  // One PairPos Format 2 subtable for a group of left classes (arrays of
+  // first gids with identical rows). Right classes are derived again over
+  // just this group's rows, so they are as few as the group allows; class 0
+  // on the right is every glyph whose column is all zero here (or that never
+  // appears). On the left, Coverage already limits the subtable to the
+  // group's glyphs, so class 0 is reused for the group's largest class (as
+  // fontTools' feaLib does) and saves one row of the matrix.
+  // Layout: header 16 | Class1Records | Coverage | ClassDef1 | ClassDef2.
+  function classPairPos(group, row) {
+    var reps = [], cov = [], rs = {}, i, j, big = 0;
+    for (i = 0; i < group.length; i++) {
+      reps.push(row[group[i][0]]);
+      for (j = 0; j < group[i].length; j++) cov.push(group[i][j]);
+      for (var r in reps[i]) rs[r] = 1;
+      if (group[i].length > group[big].length) big = i;
+    }
+    cov.sort(byNum);
+    var R = sortedKeys(rs), lab = {}, n = 0;
+    for (i = 0; i < R.length; i++) lab[R[i]] = 0;
+    for (i = 0; i < reps.length; i++) n = refine(R, lab, reps[i]);
+    var cd2 = {}, rep2 = [];
+    for (i = 0; i < R.length; i++) {
+      cd2[R[i]] = lab[R[i]] + 1;
+      if (rep2[lab[R[i]]] == null) rep2[lab[R[i]]] = R[i];
+    }
+    var order = [group[big]], cd1 = {}, c1 = group.length, c2 = n + 1;
+    for (i = 0; i < group.length; i++) if (i !== big) order.push(group[i]);
+    for (i = 1; i < c1; i++) for (j = 0; j < order[i].length; j++) cd1[order[i][j]] = i;
+
+    var a = [], cv = coverageBest(cov), d1 = classDef(cd1), d2 = classDef(cd2);
+    var oCov = 16 + 2 * c1 * c2, o1 = oCov + cv.length, o2 = o1 + d1.length;
+    if (o2 > 0xFFFF) return null;
+    u16(a, 2); u16(a, oCov); u16(a, 0x0004); u16(a, 0); u16(a, o1); u16(a, o2); u16(a, c1); u16(a, c2);
+    for (i = 0; i < c1; i++) {
+      var m = row[order[i][0]];
+      u16(a, 0);
+      for (j = 0; j < n; j++) u16(a, m[rep2[j]] || 0);
+    }
+    append(a, cv); append(a, d1); append(a, d2);
+    return a;
+  }
+
+  // Classes from the full matrix: right classes = second glyphs with
+  // identical (quantised) columns, then left classes = first glyphs with
+  // identical rows over those right classes; this is already the exact
+  // fixpoint, so one round suffices. Left classes, ordered by first gid,
+  // are then packed greedily into subtables of at most maxSub bytes (an
+  // upper-bound size estimate, so the real subtable is never larger); each
+  // subtable has its own Coverage subset and re-derived right classes.
+  // Returns [] when every value rounds to 0, or null when even one left
+  // class alone cannot fit a subtable (> ~30000 right classes) -- the
+  // caller then writes Format 1.
+  function classSubtables(sets, firsts, maxSub, q) {
+    var row = {}, L = [], seen = {}, i, j, k;
+    for (i = 0; i < firsts.length; i++) {
+      var s = sets[firsts[i]], m = null;
+      for (j = 0; j < s.length; j++) {
+        var v = quantise(s[j][1], q);
+        if (v) { (m || (m = {}))[s[j][0]] = v; seen[s[j][0]] = 1; }
+      }
+      if (m) { row[firsts[i]] = m; L.push(firsts[i]); }
+    }
+    if (!L.length) return [];
+    var R = sortedKeys(seen), lab = {}, n = 0, reps = [];
+    for (i = 0; i < R.length; i++) lab[R[i]] = 0;
+    for (i = 0; i < L.length; i++) n = refine(R, lab, row[L[i]]);
+    for (i = 0; i < R.length; i++) if (reps[lab[R[i]]] == null) reps[lab[R[i]]] = R[i];
+    var key = {}, classes = [];
+    for (i = 0; i < L.length; i++) {
+      var kk = [];
+      for (j = 0; j < n; j++) kk.push(row[L[i]][reps[j]] || 0);
+      kk = kk.join(',');
+      if (!(kk in key)) { key[kk] = classes.length; classes.push([]); }
+      classes[key[kk]].push(L[i]);
+    }
+
+    // greedy packing; the right partition of the open group is refined row
+    // by row (new glyphs enter as "zero so far"), coverage and ClassDefs
+    // are bounded by their worst-case encodings
+    var groups = [], cur = [], gl = {}, gR = [], nCov = 0, lo = 65535, hi = 0;
+    function est(c, nr, ncov, nR, span) {
+      return 16 + 2 * c * (nr + 1) + (4 + 2 * ncov) + (4 + 6 * ncov) + Math.min(4 + 6 * nR, 6 + 2 * span);
+    }
+    for (i = 0; i < classes.length; i++) {
+      var mrow = row[classes[i][0]], add = [], nlo = lo, nhi = hi;
+      for (k in mrow) if (!(k in gl)) { add.push(+k); if (+k < nlo) nlo = +k; if (+k > nhi) nhi = +k; }
+      // trial refinement on a copy, so the group can be closed unchanged
+      var tl = {}, tR = gR.concat(add).sort(byNum);
+      for (j = 0; j < gR.length; j++) tl[gR[j]] = gl[gR[j]];
+      for (j = 0; j < add.length; j++) tl[add[j]] = -1;
+      var tn = refine(tR, tl, mrow), tc = nCov + classes[i].length;
+      if (cur.length && est(cur.length + 1, tn, tc, tR.length, nhi - nlo + 1) > maxSub) {
+        groups.push(cur);
+        cur = []; gl = {}; gR = []; nCov = 0; lo = 65535; hi = 0; i--;
+        continue;
+      }
+      if (est(1, tn, classes[i].length, tR.length, nhi - nlo + 1) > maxSub && !cur.length) return null;
+      cur.push(classes[i]); gl = tl; gR = tR; nCov = tc; lo = nlo; hi = nhi;
+    }
+    groups.push(cur);
+    var subs = [];
+    for (i = 0; i < groups.length; i++) {
+      var sub = classPairPos(groups[i], row);
+      if (!sub) return null;
+      subs.push(sub);
+    }
+    return subs;
+  }
+
+  // ---------------------------------------------------------- kern lookup
+  // pairs: [[leftGid, rightGid, xAdvanceAdjust], ...] in font units.
+  // Duplicates: the last entry for a pair wins; pairs whose final value is 0
+  // are dropped. Returns the lookup bytes, or null when nothing is left.
+  //
+  // mode: false = PairPos Format 1 (exact glyph pairs); true = Format 2
+  // (class kerning, values quantised to q, see classSubtables); null /
+  // 'auto' = Format 1 up to CLASS_AUTO distinct pairs, beyond that both are
+  // built and the smaller one is kept.
+  //
+  // First glyphs are split so no PairPos subtable passes maxSub bytes. The
+  // Lookup's own subtable offsets are 16-bit too, so once the subtables
+  // together pass 64K the lookup is written as type 9 (Extension, 32-bit
+  // offsets) wrapping type-2 subtables. With Format 1 that kicks in beyond
+  // roughly 15000 pairs; note opentype.js 1.3.4 cannot read Extension
+  // lookups (HarfBuzz, browsers and fontTools can). It does read Format 2.
+  var CLASS_AUTO = 2000;
+
+  function kernLookup(pairs, flag, maxSub, mode, q) {
+    var last = {}, sets = {}, firsts = [], i, k, count = 0;
+    for (i = 0; i < (pairs || []).length; i++) {
+      var p = pairs[i];
+      last[(p[0] & 0xFFFF) * 65536 + (p[1] & 0xFFFF)] = i16(p[2]);
+    }
+    for (k in last) {
+      if (!last[k]) continue;
+      var l = Math.floor(k / 65536);
+      if (!sets[l]) { sets[l] = []; firsts.push(l); }
+      sets[l].push([k % 65536, last[k]]);
+      count++;
+    }
+    if (!firsts.length) return null;
+    firsts.sort(byNum);
+    for (i = 0; i < firsts.length; i++) sets[firsts[i]].sort(function (a, b) { return a[0] - b[0]; });
+
+    var cls = null;
+    if (mode === true || (mode == null || mode === 'auto') && count > CLASS_AUTO) {
+      var cs = classSubtables(sets, firsts, maxSub, q);
+      if (cs && !cs.length) return null;       // everything rounded to 0
+      if (cs) cls = kernWrap(cs, flag);
+      if (mode === true && cls) return cls;
+    }
+    var f1 = kernWrap(pairSubtables(sets, firsts, maxSub), flag);
+    return cls && cls.length < f1.length ? cls : f1;
+  }
+
+  // subtables -> Lookup bytes
+  function kernWrap(subs, flag) {
+    var i;
     // plain type-2 lookup if every subtable offset fits in 16 bits
     var n = subs.length, head = 6 + 2 * n, offs = [], at = head, ext = false;
     for (i = 0; i < n; i++) { offs.push(at); if (at > 0xFFFF) ext = true; at += subs[i].length; }
@@ -2000,21 +2265,29 @@ select {
   }
 
   // --------------------------------------------------------------- GPOS
-  // spec: { kern: pairs (see kernLookup), marks: (see markLookup),
-  //         ignoreMarks: bool }. Returns null when both parts are empty.
+  // spec: { kern: pairs or { pairs: pairs } (see kernLookup),
+  //         kernClasses: true | false | 'auto' (default 'auto': class
+  //                      kerning beyond 2000 pairs when it is smaller),
+  //         marks: (see markLookup), ignoreMarks: bool }.
+  // Returns null when both parts are empty.
   //
   // Structure: ScriptList {DFLT, latn} -> DefaultLangSys -> every feature;
   // FeatureList (by tag) 'kern' -> lookup 0, 'mark' -> lookup 1 (indices
   // close up when a part is missing). The kern lookup gets IgnoreMarks
   // (so A + U+0301 + V still kerns A/V, needs GDEF) whenever marks are
   // present, unless spec.ignoreMarks says otherwise.
-  // opts.maxSubtableBytes (default 60000) caps PairPos subtables.
+  // opts.maxSubtableBytes (default 60000) caps PairPos subtables;
+  // opts.kernQuantum (default 2) is the class-kerning rounding step (1 =
+  // exact); opts.kernClasses is used when spec.kernClasses is not given.
   function gpos(spec, opts) {
     spec = spec || {};
     var maxSub = (opts && opts.maxSubtableBytes) || 60000;
+    var q = opts && opts.kernQuantum != null ? opts.kernQuantum : 2;
+    var mode = spec.kernClasses != null ? spec.kernClasses : opts && opts.kernClasses;
+    var pairs = spec.kern && !Array.isArray(spec.kern) ? spec.kern.pairs : spec.kern;
     var mark = markLookup(spec.marks);
     var ign = spec.ignoreMarks != null ? !!spec.ignoreMarks : !!mark;
-    var kern = kernLookup(spec.kern, ign ? 0x0008 : 0, maxSub);
+    var kern = kernLookup(pairs, ign ? 0x0008 : 0, maxSub, mode, q);
     var feats = [], lookups = [], i, j;
     if (kern) { feats.push('kern'); lookups.push(kern); }
     if (mark) { feats.push('mark'); lookups.push(mark); }
@@ -2168,7 +2441,7 @@ select {
 </script>
 
 <script>
-var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11], [10, 94, 20]], [[52, -2, 11], [65, 44, 11], [82, 94, 20]], [[19, 76, 10.5], [73, 76, 10.5]]], "B": [[[20, 6, 19], [19, 49, 13], [20, 94, 20]], [[20, 6, 19], [42, -0.9, 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12], [22, 48, 11.5]], [[22, 48, 11.5], [48, 49, 12], [69, 56, 13.5], [78, 73, 15.5], [70, 92, 14], [46, 101.4, 14], [20, 94, 20]]], "C": [[[73.6, 18.7, 15.5], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [73.6, 82.3, 15.5]]], "D": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [65, 8, 15], [77, 28, 16.5], [79, 50, 17], [77, 72, 16.5], [65, 92, 15], [44, 101.4, 14], [20, 94, 20]]], "E": [[[72, 8, 15], [22, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]], [[20, 50, 13], [60, 50, 13]]], "F": [[[20, 94, 20], [19, 50, 15], [22, 6, 19], [72, 8, 15]], [[20, 52, 13], [60, 52, 13]]], "G": [[[69.6, 11.6, 15.0], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [70.7, 87.8, 15.0], [79, 75, 15.5], [79, 58, 13.5], [56, 58, 11.5]]], "H": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[72, 6, 19], [73, 50, 14], [72, 94, 20]], [[20, 50, 13], [72, 50, 13]]], "I": [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]], "J": [[[64, 6, 19], [64, 40, 15], [63, 66, 15.5], [56, 88, 15.5], [38, 100.9, 15], [22, 95, 15], [12, 77, 16]]], "K": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[76, 4.0, 17], [22, 54, 13.5]], [[38, 45, 13.5], [78, 96.0, 18]]], "L": [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]]], "M": [[[6, 94, 20], [5.5, 50, 13], [8, 4.0, 18], [16.4, 17.9, 11], [30.8, 41.8, 10.5], [46, 67, 11.5], [61.2, 41.8, 10.5], [75.6, 17.9, 11], [84, 4.0, 18], [86.5, 50, 13], [86, 94, 20]]], "N": [[[15, 94, 20], [13.8, 50, 12.5], [15, 5.0, 18], [27.4, 23.2, 10.5], [46.0, 50.5, 10], [64.6, 77.8, 10.5], [77, 96.0, 18], [78.2, 50, 12.5], [77, 6, 19]]], "O": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]]], "P": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]]], "Q": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]], [[58, 80, 12], [86, 108, 15]]], "R": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]], [[40, 56, 13], [78, 96.0, 18]]], "S": [[[72.4, 20, 15], [61.8, 4.5, 14.5], [46.0, -0.4, 14.5], [28.4, 4, 14.5], [19.6, 20, 15], [24.9, 37, 14.5], [40.7, 47, 14], [54.8, 54, 14], [68.9, 64, 14.5], [73.3, 81, 15], [65.4, 96, 14.5], [46.9, 101.4, 14.5], [28.4, 98, 14.5], [17.0, 82, 15]]], "T": [[[13, 1.6, 14.5], [79, 1.6, 14.5]], [[46, 6, 17], [45, 50, 14], [46, 94, 20]]], "U": [[[19, 6, 19], [19, 40, 15], [19.0, 66.0, 15.5], [29.3, 93.1, 15.5], [46.0, 100.4, 15.5], [62.7, 93.1, 15.5], [73.0, 66.0, 15.5], [73, 40, 15], [73, 6, 19]]], "V": [[[11, 5.0, 18], [29, 50, 14], [46, 97.0, 19], [63, 50, 14], [81, 5.0, 18]]], "W": [[[-3, 3.1, 16], [9, 50, 12], [21, 99.9, 15], [33, 70, 9.5], [46, 42, 10], [59, 70, 9.5], [71, 99.9, 15], [83, 50, 12], [95, 3.1, 16]]], "X": [[[13, 4.0, 17], [46, 50, 13.5], [79, 95.0, 19]], [[79, 4.0, 17], [46, 50, 13.5], [13, 95.0, 19]]], "Y": [[[13, 4.0, 17], [46, 52, 13.5], [79, 4.0, 17]], [[46, 52, 14], [46, 94, 20]]], "Z": [[[13, 2.6, 15.5], [77, 2.1, 15], [15, 97.9, 16], [80, 97.4, 16.5]]], "0": [[[46.0, -0.4, 14.5], [66.7, 12.8, 15.4], [74.0, 50.5, 16.0], [66.7, 88.2, 15.4], [46.0, 101.4, 14.5], [25.3, 88.2, 15.4], [18.0, 50.5, 16.0], [25.3, 12.8, 15.4], [46.0, -0.4, 14.5]]], "1": [[[26, 22, 14], [47, 4.0, 17], [46, 50, 15], [46, 94, 20]]], "2": [[[16, 24, 15], [26, 8, 15], [45, 0.1, 15], [64, 6, 15], [74, 22, 15.5], [69, 40, 14], [52, 58, 13.5], [19, 97.4, 16.5], [78, 97.9, 16]]], "3": [[[17, 16, 15], [30, 3, 14.5], [48, -0.4, 14.5], [66, 6, 14.5], [72, 22, 15], [62, 39, 13.5], [40, 46, 12.5], [62, 52, 14], [76, 68, 15.5], [74, 86, 15], [60, 98, 14.5], [40, 101.4, 14.5], [22, 97, 14.5], [11, 82, 15]]], "4": [[[68, 94.0, 20], [68.5, 60, 13], [68.5, 36, 11.5], [68, 3.1, 16], [57.6, 14.2, 10], [33.5, 40.1, 9.5], [-1, 77, 11.5], [90, 77, 11.5]]], "5": [[[76, 2.6, 15.5], [27, 4.0, 17], [22, 42, 14], [44, 38, 13.5], [66, 46, 15], [77, 66, 16.5], [71, 88, 15.5], [52, 101.4, 14.5], [31, 99, 14.5], [14, 86, 15]]], "6": [[[72, 12, 15], [56, -0.4, 14.5], [37, 3, 15], [22, 18, 15.5], [15, 42, 16], [15, 64, 16], [22, 86, 15.5], [40, 101.4, 14.5], [60, 98, 14.5], [75, 84, 15.5], [77, 66, 15.5], [66, 51, 14], [46, 46, 13.5], [27, 52, 14], [16, 64, 15]]], "7": [[[12, 2.6, 15.5], [80, 2.6, 15.5], [56, 50, 14], [40, 96.0, 18]]], "8": [[[46.0, -1.4, 13.5], [60.3, 4.8, 13.8], [68.0, 24.3, 14.0], [60.3, 43.8, 13.8], [46.0, 50.0, 13.5], [31.7, 43.8, 13.8], [24.0, 24.3, 14.0], [31.7, 4.8, 13.8], [46.0, -1.4, 13.5]], [[46.0, 46.0, 14.5], [63.8, 53.5, 14.8], [72.0, 73.7, 15.0], [63.8, 93.9, 14.8], [46.0, 101.4, 14.5], [28.2, 93.9, 14.8], [20.0, 73.7, 15.0], [28.2, 53.5, 14.8], [46.0, 46.0, 14.5]]], "9": [[[20.0, 89.0, 15], [36.0, 101.4, 14.5], [55.0, 98.0, 15], [70.0, 83.0, 15.5], [77.0, 59.0, 16], [77.0, 37.0, 16], [70.0, 15.0, 15.5], [52.0, -0.4, 14.5], [32.0, 3.0, 14.5], [17.0, 17.0, 15.5], [15.0, 35.0, 15.5], [26.0, 50.0, 14], [46.0, 55.0, 13.5], [65.0, 49.0, 14], [76.0, 37.0, 15]]], ".": [[[46, 97, 17]]], ",": [[[47, 96, 17], [39, 120, 9]]], "!": [[[46, 6, 16], [45, 60, 12]], [[46, 97, 16, 1]]], "?": [[[16, 22, 14.5], [27, 5, 14.5], [46, -0.4, 14.5], [65, 5, 14.5], [74, 21, 15], [66, 38, 13.5], [50, 48, 12.5], [46, 62, 12]], [[46, 97, 16, 1]]], "'": [[[46, -2, 15], [41, 24, 10]]], "-": [[[32, 51, 14], [60, 51, 14]]], ":": [[[46, 45, 16]], [[46, 97, 17, 1]]], ";": [[[46, 45, 16]], [[47, 96, 17, 1], [39, 120, 9]]], "\"": [[[30, -2, 15], [26, 24, 10]], [[62, -2, 15, 1], [58, 24, 10]]], "(": [[[64, -12, 13], [44, 10, 14], [35, 50, 15.5], [44, 90, 14], [64, 112, 13]]], ")": [[[28.0, -12, 13], [48.0, 10, 14], [57.0, 50, 15.5], [48.0, 90, 14], [28.0, 112, 13]]], "/": [[[70, -4, 14], [22, 104, 14]]], "&": [[[85, 57, 14], [79, 78, 14], [64, 94, 14], [44, 101.9, 14], [23, 96, 14.5], [12, 80, 15], [17, 62, 14], [34, 48, 12.5], [52, 36, 13], [61, 21, 13.5], [57, 6, 13.5], [42, -1.4, 13.5], [28, 6, 13.5], [22, 21, 13.5], [28, 37, 12.5], [56, 68, 13], [84, 96.9, 17]]], "+": [[[46, 24, 15], [46, 80, 15]], [[18, 52, 15], [74, 52, 15]]], "=": [[[18, 36, 14], [74, 36, 14]], [[18, 68, 14, 1], [74, 68, 14]]], "*": [[[46.0, 3.0, 10.5], [46, 26, 9.5], [46.0, 49.0, 10.5]], [[65.9, 14.5, 10.5, 1], [46, 26, 9.5], [26.1, 37.5, 10.5]], [[65.9, 37.5, 10.5, 1], [46, 26, 9.5], [26.1, 14.5, 10.5]]], "#": [[[33, 2, 11.5], [21, 100, 11.5]], [[72, 2, 11.5], [60, 100, 11.5]], [[5, 28, 11.5], [92, 28, 11.5]], [[0, 74, 11.5], [87, 74, 11.5]]], "%": [[[22.0, 4.0, 10.0], [30.7, 7.9, 10.5], [37.0, 25.0, 11.0], [30.7, 42.1, 10.5], [22.0, 46.0, 10.0], [13.3, 42.1, 10.5], [7.0, 25.0, 11.0], [13.3, 7.9, 10.5], [22.0, 4.0, 10.0]], [[76, 0, 13], [16, 102, 13]], [[70.0, 56.0, 10.0], [78.7, 59.9, 10.5], [85.0, 77.0, 11.0], [78.7, 94.1, 10.5], [70.0, 98.0, 10.0], [61.3, 94.1, 10.5], [55.0, 77.0, 11.0], [61.3, 59.9, 10.5], [70.0, 56.0, 10.0]]], "@": [[[46.0, 36.5, 9.0], [55.4, 40.6, 9.2], [61.0, 55.0, 9.5], [55.4, 69.4, 9.2], [46.0, 73.5, 9.0], [36.6, 69.4, 9.2], [31.0, 55.0, 9.5], [36.6, 40.6, 9.2], [46.0, 36.5, 9.0]], [[63, 40, 10.5], [63, 64, 11], [67, 73, 11], [76, 77, 11], [87, 72, 11.5], [95, 55, 12], [94, 32, 12.5], [82, 11, 12.5], [60, -1, 12], [34, 0, 12.5], [11, 11, 12.5], [-3, 34, 13], [-4, 62, 13], [5, 87, 12.5], [25, 102, 12], [47, 106, 11.5], [65, 103, 11]]], "\u2013": [[[14, 51, 14], [78, 51, 14]]], "\u2014": [[[-14, 51, 14], [106, 51, 14]]], "\u2018": [[[45, 22, 16], [53, -4, 8]]], "\u2019": [[[47, 0, 16], [39, 26, 8]]], "\u201c": [[[29, 22, 16], [37, -4, 8]], [[63, 22, 16, 1], [71, -4, 8]]], "\u201d": [[[29, 0, 16], [21, 26, 8]], [[63, 0, 16, 1], [55, 26, 8]]], "$": [[[71.8, 24.3, 14.5], [61.5, 10.9, 14.0], [46.0, 6.7, 14.0], [28.8, 10.5, 14.0], [20.2, 24.3, 14.5], [25.4, 38.9, 14.0], [40.8, 47.5, 13.5], [54.6, 53.5, 13.5], [68.4, 62.1, 14.0], [72.7, 76.7, 14.5], [64.9, 89.6, 14.0], [46.9, 94.3, 14.0], [28.8, 91.3, 14.0], [17.6, 77.6, 14.5]], [[46, -19, 11], [46, 10, 11.5]], [[46.5, 91, 11.5], [46.5, 120, 11]]], "\u20ab": [[[66, -8, 15], [66, 30, 13.5], [67, 70, 16]], [[66, 40, 12], [55, 30.5, 12.5], [39, 29.5, 13], [25, 38, 13.5], [20, 51, 14], [24, 64, 13.5], [37, 72.5, 13], [53, 72, 13], [66, 62, 12.5]], [[49, 2, 10.5, 1], [85, 2, 10.5]], [[18, 103, 10.5, 1], [82, 103, 10.5]]], "\u20ac": [[[78.0, 18.7, 14.5], [53.0, 0.1, 14.5], [30.8, 13.2, 15.1], [23.0, 50.5, 15.5], [30.8, 87.8, 15.1], [53.0, 100.9, 14.5], [78.0, 82.3, 14.5]], [[0, 37, 10, 1], [47, 37, 10]], [[0, 64, 10, 1], [45, 64, 10]]], "\u00a9": [[[46.0, -1.0, 10.0], [65.6, 4.3, 10.0], [82.6, 21.6, 10.0], [90.0, 50.0, 10.0], [82.6, 78.4, 10.0], [65.6, 95.7, 10.0], [46.0, 101.0, 10.0], [26.4, 95.7, 10.0], [9.4, 78.4, 10.0], [2.0, 50.0, 10.0], [9.4, 21.6, 10.0], [26.4, 4.3, 10.0], [46.0, -1.0, 10.0]], [[60.1, 35.9, 9.8, 1], [48.0, 30.0, 9.5], [37.0, 34.8, 9.8], [31.0, 50.0, 10.0], [37.0, 65.2, 9.8], [48.0, 70.0, 9.5], [60.1, 64.1, 9.8]]], "\u2026": [[[3, 97, 17]], [[46, 97, 17, 1]], [[89, 97, 17, 1]]], "\u00b0": [[[46.0, -5.0, 9.5], [58.4, 0.2, 9.5], [64.0, 14.0, 9.5], [58.4, 27.8, 9.5], [46.0, 33.0, 9.5], [33.6, 27.8, 9.5], [28.0, 14.0, 9.5], [33.6, 0.2, 9.5], [46.0, -5.0, 9.5]]], "[": [[[64, -9.5, 12.5], [35, -12, 14], [34, 50, 14], [35, 112, 14], [64, 109.5, 12.5]]], "]": [[[28.0, -9.5, 12.5], [57.0, -12, 14], [58.0, 50, 14], [57.0, 112, 14], [28.0, 109.5, 12.5]]], "{": [[[64, -12, 12], [48, -6, 12.5], [42, 8, 13], [42, 32, 13], [36, 46, 12.5], [22, 50, 13.5], [36, 54, 12.5], [42, 68, 13], [42, 92, 13], [48, 106, 12.5], [64, 112, 12]]], "}": [[[28.0, -12, 12], [44.0, -6, 12.5], [50.0, 8, 13], [50.0, 32, 13], [56.0, 46, 12.5], [70.0, 50, 13.5], [56.0, 54, 12.5], [50.0, 68, 13], [50.0, 92, 13], [44.0, 106, 12.5], [28.0, 112, 12]]], "<": [[[72, 18, 13], [20, 52, 14.5], [72, 86, 13]]], ">": [[[20.0, 18, 13], [72.0, 52, 14.5], [20.0, 86, 13]]], "|": [[[46, -14, 13.5], [46, 50, 13.5], [46, 114, 13.5]]], "\\": [[[22.0, -4, 14], [70.0, 104, 14]]], "^": [[[18, 42, 12], [46, 4, 13.5], [74, 42, 12]]], "_": [[[2, 113, 13], [90, 113, 13]]], "`": [[[32, -6, 14.5], [58, 18, 9.5]]], "~": [[[10, 59, 12], [22, 45, 13], [38, 44, 12.5], [54, 58, 12.5], [70, 57, 13], [82, 43, 12]]], "\u0301": [[[-11, 4, 9.5], [11, -9, 11]]], "\u0300": [[[-11, -9, 11], [11, 4, 9.5]]], "\u0309": [[[-9, -18, 8.5], [-1, -24, 8.5], [9, -22, 8.5], [13, -14, 8.5], [8, -7, 8], [3, -3, 8], [2, 3, 9]]], "\u0303": [[[-18, -2, 9], [-11, -8.5, 9.5], [-4, -7, 9], [4, -3, 9], [11, -1.5, 9], [18, -8, 9.5]]], "\u0323": [[[0, 0, 15]]], "\u0302": [[[-17, 3, 9.5], [0, -11, 10.5], [17, 3, 9.5]]], "\u0306": [[[-16, -10, 9.5], [-9, 0, 9], [0, 2.5, 9], [9, 0, 9], [16, -10, 9.5]]], "\u031b": [[[0, 0, 12], [14, -3, 10.5], [24, -10, 11.5]]], "\u0335": [[[-28, 0, 12, 1], [6, 0, 11.5]]]}};
+var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11], [10, 94, 20]], [[52, -2, 11], [65, 44, 11], [82, 94, 20]], [[19, 76, 10.5], [73, 76, 10.5]]], "B": [[[20, 6, 19], [19, 49, 13], [20, 94, 20]], [[20, 6, 19], [42, -0.9, 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12], [22, 48, 11.5]], [[22, 48, 11.5], [48, 49, 12], [69, 56, 13.5], [78, 73, 15.5], [70, 92, 14], [46, 101.4, 14], [20, 94, 20]]], "C": [[[73.6, 18.7, 15.5], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [73.6, 82.3, 15.5]]], "D": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [65, 8, 15], [77, 28, 16.5], [79, 50, 17], [77, 72, 16.5], [65, 92, 15], [44, 101.4, 14], [20, 94, 20]]], "E": [[[72, 8, 15], [22, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]], [[20, 50, 13], [60, 50, 13]]], "F": [[[20, 94, 20], [19, 50, 15], [22, 6, 19], [72, 8, 15]], [[20, 52, 13], [60, 52, 13]]], "G": [[[69.6, 11.6, 15.0], [47.0, 0.1, 15.0], [23.3, 13.2, 15.9], [15.0, 50.5, 16.5], [23.3, 87.8, 15.9], [47.0, 100.9, 15.0], [70.7, 87.8, 15.0], [79, 75, 15.5], [79, 58, 13.5], [56, 58, 11.5]]], "H": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[72, 6, 19], [73, 50, 14], [72, 94, 20]], [[20, 50, 13], [72, 50, 13]]], "I": [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]], "J": [[[64, 6, 19], [64, 40, 15], [63, 66, 15.5], [56, 88, 15.5], [38, 100.9, 15], [22, 95, 15], [12, 77, 16]]], "K": [[[20, 6, 19], [19, 50, 14], [20, 94, 20]], [[76, 4.0, 17], [22, 54, 13.5]], [[38, 45, 13.5], [78, 96.0, 18]]], "L": [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, 98.4, 15.5]]], "M": [[[6, 94, 20], [5.5, 50, 13], [8, 4.0, 18], [16.4, 17.9, 11], [30.8, 41.8, 10.5], [46, 67, 11.5], [61.2, 41.8, 10.5], [75.6, 17.9, 11], [84, 4.0, 18], [86.5, 50, 13], [86, 94, 20]]], "N": [[[15, 94, 20], [13.8, 50, 12.5], [15, 5.0, 18], [27.4, 23.2, 10.5], [46.0, 50.5, 10], [64.6, 77.8, 10.5], [77, 96.0, 18], [78.2, 50, 12.5], [77, 6, 19]]], "O": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]]], "P": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]]], "Q": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]], [[58, 80, 12], [86, 108, 15]]], "R": [[[20, 6, 19], [19, 50, 15], [20, 94, 20]], [[20, 6, 19], [44, -0.4, 14], [64, 6, 15], [73, 26, 16.5], [64, 46, 15], [44, 55, 13], [22, 56, 13]], [[40, 56, 13], [78, 96.0, 18]]], "S": [[[72.4, 20, 15], [61.8, 4.5, 14.5], [46.0, -0.4, 14.5], [28.4, 4, 14.5], [19.6, 20, 15], [24.9, 37, 14.5], [40.7, 47, 14], [54.8, 54, 14], [68.9, 64, 14.5], [73.3, 81, 15], [65.4, 96, 14.5], [46.9, 101.4, 14.5], [28.4, 98, 14.5], [17.0, 82, 15]]], "T": [[[13, 1.6, 14.5], [79, 1.6, 14.5]], [[46, 6, 17], [45, 50, 14], [46, 94, 20]]], "U": [[[19, 6, 19], [19, 40, 15], [19.0, 66.0, 15.5], [29.3, 93.1, 15.5], [46.0, 100.4, 15.5], [62.7, 93.1, 15.5], [73.0, 66.0, 15.5], [73, 40, 15], [73, 6, 19]]], "V": [[[11, 5.0, 18], [29, 50, 14], [46, 97.0, 19], [63, 50, 14], [81, 5.0, 18]]], "W": [[[-3, 3.1, 16], [9, 50, 12], [21, 99.9, 15], [33, 70, 9.5], [46, 42, 10], [59, 70, 9.5], [71, 99.9, 15], [83, 50, 12], [95, 3.1, 16]]], "X": [[[13, 4.0, 17], [46, 50, 13.5], [79, 95.0, 19]], [[79, 4.0, 17], [46, 50, 13.5], [13, 95.0, 19]]], "Y": [[[13, 4.0, 17], [46, 52, 13.5], [79, 4.0, 17]], [[46, 52, 14], [46, 94, 20]]], "Z": [[[13, 2.6, 15.5], [77, 2.1, 15], [15, 97.9, 16], [80, 97.4, 16.5]]], "0": [[[46.0, -0.4, 14.5], [66.7, 12.8, 15.4], [74.0, 50.5, 16.0], [66.7, 88.2, 15.4], [46.0, 101.4, 14.5], [25.3, 88.2, 15.4], [18.0, 50.5, 16.0], [25.3, 12.8, 15.4], [46.0, -0.4, 14.5]]], "1": [[[26, 22, 14], [47, 4.0, 17], [46, 50, 15], [46, 94, 20]]], "2": [[[16, 24, 15], [26, 8, 15], [45, 0.1, 15], [64, 6, 15], [74, 22, 15.5], [69, 40, 14], [52, 58, 13.5], [19, 97.4, 16.5], [78, 97.9, 16]]], "3": [[[17, 16, 15], [30, 3, 14.5], [48, -0.4, 14.5], [66, 6, 14.5], [72, 22, 15], [62, 39, 13.5], [40, 46, 12.5], [62, 52, 14], [76, 68, 15.5], [74, 86, 15], [60, 98, 14.5], [40, 101.4, 14.5], [22, 97, 14.5], [11, 82, 15]]], "4": [[[68, 94.0, 20], [68.5, 60, 13], [68.5, 36, 11.5], [68, 3.1, 16], [57.6, 14.2, 10], [33.5, 40.1, 9.5], [-1, 77, 11.5], [90, 77, 11.5]]], "5": [[[76, 2.6, 15.5], [27, 4.0, 17], [22, 42, 14], [44, 38, 13.5], [66, 46, 15], [77, 66, 16.5], [71, 88, 15.5], [52, 101.4, 14.5], [31, 99, 14.5], [14, 86, 15]]], "6": [[[72, 12, 15], [56, -0.4, 14.5], [37, 3, 15], [22, 18, 15.5], [15, 42, 16], [15, 64, 16], [22, 86, 15.5], [40, 101.4, 14.5], [60, 98, 14.5], [75, 84, 15.5], [77, 66, 15.5], [66, 51, 14], [46, 46, 13.5], [27, 52, 14], [16, 64, 15]]], "7": [[[12, 2.6, 15.5], [80, 2.6, 15.5], [56, 50, 14], [40, 96.0, 18]]], "8": [[[46.0, -1.4, 13.5], [60.3, 4.8, 13.8], [68.0, 24.3, 14.0], [60.3, 43.8, 13.8], [46.0, 50.0, 13.5], [31.7, 43.8, 13.8], [24.0, 24.3, 14.0], [31.7, 4.8, 13.8], [46.0, -1.4, 13.5]], [[46.0, 46.0, 14.5], [63.8, 53.5, 14.8], [72.0, 73.7, 15.0], [63.8, 93.9, 14.8], [46.0, 101.4, 14.5], [28.2, 93.9, 14.8], [20.0, 73.7, 15.0], [28.2, 53.5, 14.8], [46.0, 46.0, 14.5]]], "9": [[[20.0, 89.0, 15], [36.0, 101.4, 14.5], [55.0, 98.0, 15], [70.0, 83.0, 15.5], [77.0, 59.0, 16], [77.0, 37.0, 16], [70.0, 15.0, 15.5], [52.0, -0.4, 14.5], [32.0, 3.0, 14.5], [17.0, 17.0, 15.5], [15.0, 35.0, 15.5], [26.0, 50.0, 14], [46.0, 55.0, 13.5], [65.0, 49.0, 14], [76.0, 37.0, 15]]], ".": [[[46, 97, 17]]], ",": [[[47, 96, 17], [39, 120, 9]]], "!": [[[46, 6, 16], [45, 60, 12]], [[46, 97, 16, 1]]], "?": [[[16, 22, 14.5], [27, 5, 14.5], [46, -0.4, 14.5], [65, 5, 14.5], [74, 21, 15], [66, 38, 13.5], [50, 48, 12.5], [46, 62, 12]], [[46, 97, 16, 1]]], "'": [[[46, -2, 15], [41, 24, 10]]], "-": [[[32, 51, 14], [60, 51, 14]]], ":": [[[46, 45, 16]], [[46, 97, 17, 1]]], ";": [[[46, 45, 16]], [[47, 96, 17, 1], [39, 120, 9]]], "\"": [[[30, -2, 15], [26, 24, 10]], [[62, -2, 15, 1], [58, 24, 10]]], "(": [[[64, -12, 13], [44, 10, 14], [35, 50, 15.5], [44, 90, 14], [64, 112, 13]]], ")": [[[28.0, -12, 13], [48.0, 10, 14], [57.0, 50, 15.5], [48.0, 90, 14], [28.0, 112, 13]]], "/": [[[70, -4, 14], [22, 104, 14]]], "&": [[[85, 57, 14], [79, 78, 14], [64, 94, 14], [44, 101.9, 14], [23, 96, 14.5], [12, 80, 15], [17, 62, 14], [34, 48, 12.5], [52, 36, 13], [61, 21, 13.5], [57, 6, 13.5], [42, -1.4, 13.5], [28, 6, 13.5], [22, 21, 13.5], [28, 37, 12.5], [56, 68, 13], [84, 96.9, 17]]], "+": [[[46, 24, 15], [46, 80, 15]], [[18, 52, 15], [74, 52, 15]]], "=": [[[18, 36, 14], [74, 36, 14]], [[18, 68, 14, 1], [74, 68, 14]]], "*": [[[46.0, 3.0, 10.5], [46, 26, 9.5], [46.0, 49.0, 10.5]], [[65.9, 14.5, 10.5, 1], [46, 26, 9.5], [26.1, 37.5, 10.5]], [[65.9, 37.5, 10.5, 1], [46, 26, 9.5], [26.1, 14.5, 10.5]]], "#": [[[33, 2, 11.5], [21, 100, 11.5]], [[72, 2, 11.5], [60, 100, 11.5]], [[5, 28, 11.5], [92, 28, 11.5]], [[0, 74, 11.5], [87, 74, 11.5]]], "%": [[[22.0, 4.0, 10.0], [30.7, 7.9, 10.5], [37.0, 25.0, 11.0], [30.7, 42.1, 10.5], [22.0, 46.0, 10.0], [13.3, 42.1, 10.5], [7.0, 25.0, 11.0], [13.3, 7.9, 10.5], [22.0, 4.0, 10.0]], [[76, 0, 13], [16, 102, 13]], [[70.0, 56.0, 10.0], [78.7, 59.9, 10.5], [85.0, 77.0, 11.0], [78.7, 94.1, 10.5], [70.0, 98.0, 10.0], [61.3, 94.1, 10.5], [55.0, 77.0, 11.0], [61.3, 59.9, 10.5], [70.0, 56.0, 10.0]]], "@": [[[46.0, 36.5, 9.0], [55.4, 40.6, 9.2], [61.0, 55.0, 9.5], [55.4, 69.4, 9.2], [46.0, 73.5, 9.0], [36.6, 69.4, 9.2], [31.0, 55.0, 9.5], [36.6, 40.6, 9.2], [46.0, 36.5, 9.0]], [[63, 40, 10.5], [63, 64, 11], [67, 73, 11], [76, 77, 11], [87, 72, 11.5], [95, 55, 12], [94, 32, 12.5], [82, 11, 12.5], [60, -1, 12], [34, 0, 12.5], [11, 11, 12.5], [-3, 34, 13], [-4, 62, 13], [5, 87, 12.5], [25, 102, 12], [47, 106, 11.5], [65, 103, 11]]], "\u2013": [[[14, 51, 14], [78, 51, 14]]], "\u2014": [[[-14, 51, 14], [106, 51, 14]]], "\u2018": [[[45, 22, 16], [53, -4, 8]]], "\u2019": [[[47, 0, 16], [39, 26, 8]]], "\u201c": [[[29, 22, 16], [37, -4, 8]], [[63, 22, 16, 1], [71, -4, 8]]], "\u201d": [[[29, 0, 16], [21, 26, 8]], [[63, 0, 16, 1], [55, 26, 8]]], "$": [[[71.8, 24.3, 14.5], [61.5, 10.9, 14.0], [46.0, 6.7, 14.0], [28.8, 10.5, 14.0], [20.2, 24.3, 14.5], [25.4, 38.9, 14.0], [40.8, 47.5, 13.5], [54.6, 53.5, 13.5], [68.4, 62.1, 14.0], [72.7, 76.7, 14.5], [64.9, 89.6, 14.0], [46.9, 94.3, 14.0], [28.8, 91.3, 14.0], [17.6, 77.6, 14.5]], [[46, -19, 11], [46, 10, 11.5]], [[46.5, 91, 11.5], [46.5, 120, 11]]], "\u20ab": [[[66, -8, 15], [66, 30, 13.5], [67, 70, 16]], [[66, 40, 12], [55, 30.5, 12.5], [39, 29.5, 13], [25, 38, 13.5], [20, 51, 14], [24, 64, 13.5], [37, 72.5, 13], [53, 72, 13], [66, 62, 12.5]], [[49, 2, 10.5, 1], [85, 2, 10.5]], [[18, 103, 10.5, 1], [82, 103, 10.5]]], "\u20ac": [[[78.0, 18.7, 14.5], [53.0, 0.1, 14.5], [30.8, 13.2, 15.1], [23.0, 50.5, 15.5], [30.8, 87.8, 15.1], [53.0, 100.9, 14.5], [78.0, 82.3, 14.5]], [[0, 37, 10, 1], [47, 37, 10]], [[0, 64, 10, 1], [45, 64, 10]]], "\u00a9": [[[46.0, -1.0, 10.0], [65.6, 4.3, 10.0], [82.6, 21.6, 10.0], [90.0, 50.0, 10.0], [82.6, 78.4, 10.0], [65.6, 95.7, 10.0], [46.0, 101.0, 10.0], [26.4, 95.7, 10.0], [9.4, 78.4, 10.0], [2.0, 50.0, 10.0], [9.4, 21.6, 10.0], [26.4, 4.3, 10.0], [46.0, -1.0, 10.0]], [[60.1, 35.9, 9.8, 1], [48.0, 30.0, 9.5], [37.0, 34.8, 9.8], [31.0, 50.0, 10.0], [37.0, 65.2, 9.8], [48.0, 70.0, 9.5], [60.1, 64.1, 9.8]]], "\u2026": [[[3, 97, 17]], [[46, 97, 17, 1]], [[89, 97, 17, 1]]], "\u00b0": [[[46.0, -5.0, 9.5], [58.4, 0.2, 9.5], [64.0, 14.0, 9.5], [58.4, 27.8, 9.5], [46.0, 33.0, 9.5], [33.6, 27.8, 9.5], [28.0, 14.0, 9.5], [33.6, 0.2, 9.5], [46.0, -5.0, 9.5]]], "[": [[[64, -9.5, 12.5], [35, -12, 14], [34, 50, 14], [35, 112, 14], [64, 109.5, 12.5]]], "]": [[[28.0, -9.5, 12.5], [57.0, -12, 14], [58.0, 50, 14], [57.0, 112, 14], [28.0, 109.5, 12.5]]], "{": [[[64, -12, 12], [48, -6, 12.5], [42, 8, 13], [42, 32, 13], [36, 46, 12.5], [22, 50, 13.5], [36, 54, 12.5], [42, 68, 13], [42, 92, 13], [48, 106, 12.5], [64, 112, 12]]], "}": [[[28.0, -12, 12], [44.0, -6, 12.5], [50.0, 8, 13], [50.0, 32, 13], [56.0, 46, 12.5], [70.0, 50, 13.5], [56.0, 54, 12.5], [50.0, 68, 13], [50.0, 92, 13], [44.0, 106, 12.5], [28.0, 112, 12]]], "<": [[[72, 18, 13], [20, 52, 14.5], [72, 86, 13]]], ">": [[[20.0, 18, 13], [72.0, 52, 14.5], [20.0, 86, 13]]], "|": [[[46, -14, 13.5], [46, 50, 13.5], [46, 114, 13.5]]], "\\": [[[22.0, -4, 14], [70.0, 104, 14]]], "^": [[[18, 42, 12], [46, 4, 13.5], [74, 42, 12]]], "_": [[[2, 113, 13], [90, 113, 13]]], "`": [[[32, -6, 14.5], [58, 18, 9.5]]], "~": [[[10, 59, 12], [22, 45, 13], [38, 44, 12.5], [54, 58, 12.5], [70, 57, 13], [82, 43, 12]]], "\u00d8": [[[46.0, 0.1, 15.0], [70.7, 12.7, 15.9], [79.0, 50.5, 16.5], [70.7, 88.3, 15.9], [46.0, 100.9, 15.0], [21.3, 88.3, 15.9], [13.0, 50.5, 16.5], [21.3, 12.7, 15.9], [46.0, 0.1, 15.0]], [[10.4, 102.5, 11, 1], [81.6, -1.5, 11]]], "\u00c6": [[[2, 94, 20], [20, 50, 11], [38, 3.1, 16], [62, 6, 18], [104, 8, 15]], [[62, 6, 18], [61, 50, 14.5], [62, 94, 20], [107, 98.4, 15.5]], [[63, 50, 13], [99, 50, 13]], [[14, 72, 10.5], [62, 72, 10.5]]], "\u0152": [[[106, 8, 15], [62, 6, 18], [42.0, 0.1, 15.0], [16.8, 13.2, 15.9], [8.0, 50.5, 16.5], [16.8, 87.8, 15.9], [42.0, 100.9, 15.0], [62, 94, 20], [108, 98.4, 15.5]], [[62, 6, 18], [61, 50, 14.5], [62, 94, 20]], [[63, 50, 13], [100, 50, 13]]], "\u00a3": [[[78, 24, 14], [70, 7, 13.5], [53, -1.4, 13.5], [36, 6, 14], [27, 24, 14.5], [26, 50, 15], [24, 76, 15.5], [12, 96.0, 18], [80, 97.9, 16]], [[4, 54, 12.5], [56, 54, 12.5]]], "\u00a5": [[[13, 4.0, 17], [46, 42, 13.5], [79, 4.0, 17]], [[46, 42, 14], [46, 94, 19]], [[20, 56, 9.5, 1], [72, 56, 9.5]], [[20, 76, 9.5, 1], [72, 76, 9.5]]], "\u00ab": [[[42, 30, 10.5], [16, 53, 12], [42, 76, 10.5]], [[74, 30, 10.5, 1], [48, 53, 12], [74, 76, 10.5]]], "\u00bb": [[[50.0, 30, 10.5], [76.0, 53, 12], [50.0, 76, 10.5]], [[18.0, 30, 10.5, 1], [44.0, 53, 12], [18.0, 76, 10.5]]], "\u2022": [[[46, 52, 20]]], "\u00d7": [[[26, 32, 13.5], [66, 72, 13.5]], [[66, 32, 13.5], [26, 72, 13.5]]], "\u00ae": [[[46.0, -1.0, 10.0], [71.3, 4.5, 10.0], [85.2, 20.7, 10.0], [90.0, 50.0, 10.0], [85.2, 79.3, 10.0], [71.3, 95.5, 10.0], [46.0, 101.0, 10.0], [20.7, 95.5, 10.0], [6.8, 79.3, 10.0], [2.0, 50.0, 10.0], [6.8, 20.7, 10.0], [20.7, 4.5, 10.0], [46.0, -1.0, 10.0]], [[35.1, 30.6, 10.5, 1], [34.7, 50.0, 8.2], [35.1, 69.4, 11.0]], [[35.1, 30.6, 10.5], [45.7, 27.8, 7.7], [54.5, 30.6, 8.2], [58.4, 39.4, 9.1], [54.5, 48.2, 8.2], [45.7, 52.2, 7.2], [36.0, 52.6, 7.2]], [[43.9, 52.6, 7.2], [60.6, 70.2, 9.9]]], "\u2122": [[[-4, -3.3, 9.5], [34, -3.3, 9.5]], [[15, -3.3, 9.5], [15, 38, 10]], [[46, 38, 10, 1], [46, 20, 8.5], [46, -3.3, 9.5], [64, 30, 8.5], [82, -3.3, 9.5], [82, 20, 8.5], [82, 38, 10]]], "\u00bf": [[[76.0, 99.0, 14.5], [65.0, 116.0, 14.5], [46.0, 121.4, 14.5], [27.0, 116.0, 14.5], [18.0, 100.0, 15], [26.0, 83.0, 13.5], [42.0, 73.0, 12.5], [46.0, 59.0, 12]], [[46.0, 24.0, 16, 1]]], "\u00a1": [[[46.0, 115.0, 16], [47.0, 61.0, 12]], [[46.0, 24.0, 16, 1]]], "\u0301": [[[-11, 4, 9.5], [11, -9, 11]]], "\u0300": [[[-11, -9, 11], [11, 4, 9.5]]], "\u0309": [[[-9, -18, 8.5], [-1, -24, 8.5], [9, -22, 8.5], [13, -14, 8.5], [8, -7, 8], [3, -3, 8], [2, 3, 9]]], "\u0303": [[[-18, -2, 9], [-11, -8.5, 9.5], [-4, -7, 9], [4, -3, 9], [11, -1.5, 9], [18, -8, 9.5]]], "\u0323": [[[0, 0, 15]]], "\u0302": [[[-17, 3, 9.5], [0, -11, 10.5], [17, 3, 9.5]]], "\u0306": [[[-16, -10, 9.5], [-9, 0, 9], [0, 2.5, 9], [9, 0, 9], [16, -10, 9.5]]], "\u031b": [[[0, 0, 12], [14, -3, 10.5], [24, -10, 11.5]]], "\u0335": [[[-28, 0, 12, 1], [6, 0, 11.5]]], "\u0308": [[[-15, 0, 11]], [[15, 0, 11, 1]]], "\u0307": [[[0, 0, 11.5]]], "\u030a": [[[0.0, -12.0, 7.5], [9.6, -8.1, 7.8], [13.0, 0.0, 8.0], [9.6, 8.1, 7.8], [0.0, 12.0, 7.5], [-9.6, 8.1, 7.8], [-13.0, 0.0, 8.0], [-9.6, -8.1, 7.8], [0.0, -12.0, 7.5]]], "\u030c": [[[-17, -11, 9.5], [0, 3, 10.5], [17, -11, 9.5]]], "\u0304": [[[-14, 0, 10], [14, 0, 10]]], "\u0327": [[[0, -1, 9.5], [1, 7, 8.5], [5, 10.5, 8], [11, 14, 8], [12.5, 20, 8], [9, 26, 8], [1, 29, 8], [-7, 27.5, 8.5]]], "\u0328": [[[0, -1, 9.5], [-4, 8, 9], [-6, 16, 8.5], [-3, 23, 8], [5, 26, 7.5], [13, 24, 7]]]}};
 </script>
 
 <script>
@@ -2196,18 +2469,22 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // below for the dot below and the comma tail. Sizes everywhere — preview
   // px, OTF units — are em sizes, exactly like any installed font. The
   // ascender and descender are re-measured from the ink (measureStacks).
-  var CAP_EM = 0.70, WORD_EM = 0.24;
+  var CAP_EM = 0.70;
+  function wordEm() { return 0.18 + 0.0086 * state.spacing; }   // 0.24em at the default Spacing
   var ASC_EM = 1.02, DESC_EM = 0.25;
 
   var LETTERS = Object.keys(BASE).filter(function (k) { return !isMark(k); });
   var MARK_KEYS = GC.MARK_ORDER.filter(function (k) { return BASE[k]; });
   var VIET = GC.vietnameseUpper();
+  // every other Latin capital the mark skeletons can build (Ä Ç Č Ñ Ž …)
+  var LATIN = GC.latinUpper(function (k) { return !!BASE[k]; });
   var ALNUM = /^[A-Z0-9]$/;
   var SETS = [
     ['Uppercase', Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ')],
     ['Numerals', Array.from('0123456789')],
     ['Punctuation', LETTERS.filter(function (k) { return !ALNUM.test(k); })],
     ['Vietnamese', VIET],
+    ['Latin', LATIN],
     ['Marks', MARK_KEYS],
   ];
   var ORDER = [];
@@ -2281,15 +2558,24 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       L.scale, L.gapTop, L.gapStack, L.gapBottom].join('|');
   }
   function verOf(L) { return (isMark(L) ? 0 : globalVer) + '.' + letterVer[L]; }
-  function hasKey(k) { return !!FLAT[k]; }
+  var own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+  function hasKey(k) { return own(FLAT, k); }
 
+  // Per-glyph shape tuning from the glyph data (tune: {M: {melt: 0.6}}):
+  // letters with narrow counters (M W # @ 8) take less melt, so the heavy
+  // flow states don't clot them while every other letter keeps the full pour.
+  var TUNE = GLYPH_DATA.tune || {};
+  function meltFor(key) {
+    var t = Object.prototype.hasOwnProperty.call(TUNE, key) && TUNE[key];
+    return state.melt * (t && t.melt > 0 ? t.melt : 1);
+  }
   function traceChains(chains, key, tag) {
     var k = 't|' + key + '|' + tag;
     if (cache[k]) return cache[k];
     var r;
     try {
       r = BlobEngine.glyphRings(GC.markChains(key, chains), GC.traceOpts(key, {
-        mass: state.mass, melt: state.melt, tension: state.tension, wobble: state.wobble,
+        mass: state.mass, melt: meltFor(key), tension: state.tension, wobble: state.wobble,
         grain: state.grain, smooth: state.smooth, simplify: 0.3,
         // while a slider is being dragged, trace coarser and refine on release
         res: state.draft ? state.res * 1.7 : state.res,
@@ -2314,15 +2600,28 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var c = compositeOf(L);
     return c ? c.rings : [];
   }
-  function canDraw(L) { return (FLAT[L] && !isMark(L)) || !!GC.plan(L, hasKey); }
+  function canDraw(L) { return (hasKey(L) && !isMark(L)) || !!GC.plan(L, hasKey); }
+  // the letter an accented glyph is built on (Ấ -> A, Ơ -> O); itself otherwise
+  function baseOf(L) { var p = !hasKey(L) && GC.plan(L, hasKey); return p ? p.base : L; }
   // path strings are cached per traced ring set (rings are immutable once
   // traced), so a spacing-only change rebuilds no geometry text at all
   var dCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function ringsToD(rings) {
+    if (state.draft) return ringsToPoly(rings);   // live slider/global drag: plain polylines, curves on release
     var hit = dCache && dCache.get(rings);
     if (hit !== undefined) return hit;
     var d = ringsToDRaw(rings);
     if (dCache) dCache.set(rings, d);
+    return d;
+  }
+  function ringsToPoly(rings) {
+    var d = '';
+    for (var i = 0; i < rings.length; i++) {
+      var r = rings[i];
+      d += 'M' + r[0][0].toFixed(1) + ',' + r[0][1].toFixed(1);
+      for (var j = 1; j < r.length; j++) d += 'L' + r[j][0].toFixed(1) + ',' + r[j][1].toFixed(1);
+      d += 'Z';
+    }
     return d;
   }
   // smooth cubics through the traced points (BlobEngine.ringToCubics)
@@ -2406,20 +2705,23 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   function spacingOf(L) {
     if (SPC[L]) return SPC[L];
     var rings = ringsOf(L), fr = rowFrame();
-    var bb = GC.bbox(rings) || [0, MET.cap, MET.capH * 0.3, MET.base];
+    // a composite is spaced from its letter (plain or fused): floating
+    // accents may overhang, the kerning floor keeps them off neighbours
+    var comp = !FLAT[L] && compositeOf(L);
+    var bb = GC.bbox(comp ? comp.baseRings : rings) || [0, MET.cap, MET.capH * 0.3, MET.base];
     var pr = profileOf(rings, fr);
-    // average white depth per side over the cap band, capped so one deep
-    // notch (the inside of a T's arm) can't dominate
+    // average white depth per side over the cap band; a side that is open
+    // for most of its height (L's right, T's) may go past the usual cap
     var dmax = 0.30 * MET.capH, dl = 0, dr = 0, n = 0;
     for (var i = 0; i < ROWS; i++) {
       var y = fr.y0 + (i + 0.5) * fr.st;
       if (y < fr.c0 || y > fr.c1 || !isFinite(pr.lo[i])) continue;
-      dl += Math.min(pr.lo[i] - bb[0], dmax); dr += Math.min(bb[2] - pr.hi[i], dmax); n++;
+      dl += Math.min(pr.lo[i] - bb[0], 1.4 * dmax); dr += Math.min(bb[2] - pr.hi[i], 1.4 * dmax); n++;
     }
     dl = n ? dl / n / dmax : 0; dr = n ? dr / n / dmax : 0;
     var sp = state.spacing * MET.capH / 100, k = 1;
     var lsb = sp * (1 - k * dl), rsb = sp * (1 - k * dr);
-    var adj = state.metrics[L];
+    var adj = own(state.metrics, L) && state.metrics[L];
     if (adj) { lsb += adj[0]; rsb += adj[1]; }
     return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi });
   }
@@ -2437,7 +2739,9 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   function kernOf(a, b) {
     if (!a || !b) return 0;
     var key = a + '\u0000' + b;
-    if (state.kernOv[key] != null) return state.kernOv[key];   // a designer's own value wins
+    if (own(state.kernOv, key)) return state.kernOv[key];   // a designer's own value wins
+    var bk = baseOf(a) + '\u0000' + baseOf(b);               // ...and reaches Á Ấ Ạ when set on A
+    if (bk !== key && own(state.kernOv, bk)) return state.kernOv[bk];
     if (!(state.kern > 0)) return 0;
     if (key in KERN) return KERN[key];
     if (KBASE == null) {
@@ -2445,22 +2749,38 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       KBASE = Math.max(1, h.lsb + h.rsb);
       KOVER = interaction(h, h).over;   // H|H is the zero point: only extra shared white counts
     }
-    var it = interaction(spacingOf(a), spacingOf(b)), v = 0;
+    var A = spacingOf(a), B = spacingOf(b), it = interaction(A, B), v = 0;
     if (isFinite(it.minG)) {
       v = -(it.nest + 0.5 * Math.max(0, it.over - KOVER)) * state.kern;
-      v = Math.max(v, 0.4 * KBASE - it.minG);                       // ink floor
-      v = Math.min(0.25 * KBASE, Math.max(-0.45 * MET.capH, v));    // sane range
+      v = Math.max(v, -0.45 * MET.capH, -0.6 * Math.min(A.adv, B.adv));   // never tuck a whole glyph under
+      v = Math.min(v, 0.25 * KBASE);
+      v = Math.max(v, 0.4 * KBASE - it.minG);   // the ink floor always wins (Ấ|Ầ: two side tones meeting)
     }
     if (Math.abs(v) < 0.6) v = 0;
     return (KERN[key] = v);
   }
+  // the nearest-ink test looks ±10% of the cap height up and down, so a
+  // period tucked beside the low bar of a 4 is still seen as close
+  function dilate(prof, k, hiSide) {
+    var out = [];
+    for (var i = 0; i < ROWS; i++) {
+      var v = hiSide ? -Infinity : Infinity;
+      for (var j = Math.max(0, i - k); j <= Math.min(ROWS - 1, i + k); j++) {
+        if (hiSide ? prof[j] > v : prof[j] < v) v = prof[j];
+      }
+      out.push(v);
+    }
+    return out;
+  }
   function interaction(A, B) {
     var fr = rowFrame(), cap = 0.3 * MET.capH;
-    var minG = Infinity, over = 0, n = 0;
+    var minG = Infinity, over = 0, n = 0, k = Math.max(1, Math.round(0.1 * MET.capH / fr.st));
+    if (!A.hiD) A.hiD = dilate(A.hi, k, true);
+    if (!B.loD) B.loD = dilate(B.lo, k, false);
     for (var i = 0; i < ROWS; i++) {
       var ha = isFinite(A.hi[i]), hb = isFinite(B.lo[i]);
-      if (ha && hb) {
-        var g = (A.x1 - A.hi[i]) + A.rsb + B.lsb + (B.lo[i] - B.x0);
+      if (isFinite(A.hiD[i]) && isFinite(B.loD[i])) {
+        var g = (A.x1 - A.hiD[i]) + A.rsb + B.lsb + (B.loD[i] - B.x0);
         if (g < minG) minG = g;
       }
       var y = fr.y0 + (i + 0.5) * fr.st;
@@ -2513,7 +2833,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // demand.
   var extraKeys = {};
   // a lone mark is shown where it would sit on a host letter
-  function markHost(m) { return m === '̵' ? 'D' : 'O'; }
+  function markHost(m) { return m === '\u0335' ? 'D' : 'O'; }
   function markPlacement(m) {
     var c = compositeOf(markHost(m) + m), part = null;
     if (c) c.parts.forEach(function (p) { if (p.key === m) part = p; });
@@ -2540,15 +2860,24 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       out.push([gid(c.baseKey), '<path id="' + gid(c.baseKey) + '" d="' + ringsToD(c.baseRings) + '" fill-rule="nonzero"/>']);
     }
     var m = markD && markD.get(c);
-    if (m === undefined) { m = ringsToDRaw(c.rings.slice(c.baseCount)); if (markD) markD.set(c, m); }
+    if (m === undefined) {
+      m = state.draft ? ringsToPoly(c.rings.slice(c.baseCount)) : ringsToDRaw(c.rings.slice(c.baseCount));
+      if (markD && !state.draft) markD.set(c, m);
+    }
     out.push([gid(L), '<g id="' + gid(L) + '"><use href="#' + gid(c.baseKey) + '"/><path d="' + m + '" fill-rule="nonzero"/></g>']);
   }
   function refreshDefs() {
     SPC = {}; KERN = {}; KBASE = null; fusedDefs = {};
     measureMetrics();
-    measureStacks();
+    if (!state.draft) measureStacks();   // ascender/descender settle on release
     var list = [];
     MARK_KEYS.concat(LETTERS, VIET, Object.keys(extraKeys)).forEach(function (L) { defEntries(L, list); });
+    // the wider Latin set follows a beat later while a slider is moving
+    LATIN.forEach(function (L) {
+      var id = gid(L);
+      if (state.draft && lastDefs[id]) list.push([id, lastDefs[id]]);
+      else defEntries(L, list);
+    });
     var changed = list.filter(function (e) { return lastDefs[e[0]] !== e[1]; });
     if (changed.length > list.length / 3 || !defsInner.firstChild) {
       defsInner.innerHTML = list.map(function (e) { return e[1]; }).join('');
@@ -2563,7 +2892,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     list.forEach(function (e) { lastDefs[e[0]] = e[1]; });
   }
   function ensureDef(L) {
-    if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0) return;
+    if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0 || LATIN.indexOf(L) >= 0) return;
     extraKeys[L] = 1;
     var list = [];
     defEntries(L, list);
@@ -2789,7 +3118,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
 
   function fillText(holder, text, size, tr) {
-    var k = size / MET.em, space = WORD_EM * size + tr * size;
+    var k = size / MET.em, space = wordEm() * size + tr * size;
     text.split(/\s+/).forEach(function (chunk) {
       if (!chunk) return;
       var word = document.createElement('span');
@@ -3123,6 +3452,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     // a node) doesn't wipe the redo stack
     drag = { idx: idx, mode: mode, key: n.key, src: n.idx, s: n.s, zone: n.zone, sx: e.clientX, sy: e.clientY,
              start: effNodes(n.key)[n.idx].slice(), moved: false, snap: snapshot() };
+    if (state.globalEdit && !isMark(n.key)) state.draft = true;   // a global drag reshapes every letter: trace coarse until release
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     renderEditor();
@@ -3150,6 +3480,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     window.removeEventListener('pointerup', onUp);
     var moved = drag && drag.moved;
     drag = null;
+    if (state.draft) { draftOff(); return; }
     if (moved) { markDirty(); schedule(); }   // schedule: refresh the character-set frames skipped mid-drag
   }
 
@@ -3379,7 +3710,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     pairK.disabled = !ab;
     pairPv.innerHTML = '';
     if (!ab) { pairK.value = ''; return; }
-    var key = ab[0] + '\u0000' + ab[1], v = kernOf(ab[0], ab[1]), manual = state.kernOv[key] != null;
+    var key = ab[0] + '\u0000' + ab[1], v = kernOf(ab[0], ab[1]), manual = own(state.kernOv, key);
     if (document.activeElement !== pairK) pairK.value = v.toFixed(1);
     pairK.classList.toggle('manual', manual);
     $('btnPairAuto').disabled = !manual;
@@ -3396,7 +3727,9 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var ab = pairKeys(), v = parseFloat(pairK.value);
     if (!ab || !isFinite(v)) { updatePair(); return; }
     pushUndo();
-    state.kernOv[ab[0] + '\u0000' + ab[1]] = Math.max(-60, Math.min(30, v));
+    var cv = Math.max(-60, Math.min(30, v));
+    if (cv !== v) toast('Kerning is limited to −60 … +30 units; set ' + cv);
+    state.kernOv[ab[0] + '\u0000' + ab[1]] = cv;
     KERN = {}; schedule(); markDirty();
   });
   $('btnPairAuto').addEventListener('click', function () {
@@ -3658,8 +3991,8 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
   renderSwatches();
   function updateCoverage() {
-    var n = LETTERS.length + VIET.filter(canDraw).length;
-    $('glyphCountMeta').textContent = n + ' glyphs · Việt ' + VIET.filter(canDraw).length + '/' + VIET.length;
+    var v = VIET.filter(canDraw).length, l = LATIN.filter(canDraw).length;
+    $('glyphCountMeta').textContent = (LETTERS.length + v + l) + ' glyphs · Việt ' + v + '/' + VIET.length + ' · Latin +' + l;
   }
 
   // ------------------------------------------------------------ persistence
@@ -3704,7 +4037,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
   // {key: {index: [dx, dy, dr]}} with sane numbers only
   function cleanOv(o, flat) {
-    var out = {};
+    var out = Object.create(null);
     if (!o || typeof o !== 'object') return out;
     Object.keys(o).forEach(function (i) {
       var d = o[i];
@@ -3735,15 +4068,16 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     q.shape.smooth = Math.round(q.shape.smooth);
     var spc = p.spacing || {};
     q.spacing = num(spc.spacing, 0, 20, 7); q.kern = num(spc.kern, 0, 1, 0.7);
-    q.metrics = {};
+    var hasB = function (x) { return own(BASE, x); };
+    q.metrics = Object.create(null);
     if (spc.metrics && typeof spc.metrics === 'object') Object.keys(spc.metrics).forEach(function (k) {
       var m = spc.metrics[k];
-      if (BASE[k] || GC.plan(k, function (x) { return !!BASE[x]; })) {
+      if (hasB(k) || GC.plan(k, hasB)) {
         if (Array.isArray(m) && isFinite(m[0]) && isFinite(m[1])) q.metrics[k] = [num(m[0], -60, 60, 0), num(m[1], -60, 60, 0)];
       }
     });
-    q.kernOv = {};
-    var hasK = function (x) { return !!BASE[x]; };
+    q.kernOv = Object.create(null);
+    var hasK = hasB;
     if (spc.pairs && typeof spc.pairs === 'object') Object.keys(spc.pairs).slice(0, 5000).forEach(function (k) {
       var ab = k.split('\u0000'), v = +spc.pairs[k];
       if (ab.length === 2 && isFinite(v) && ab.every(function (g) { return GC.plan(g, hasK); })) q.kernOv[k] = num(v, -60, 30, 0);
@@ -3751,17 +4085,20 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var mk = p.marks || {};
     q.marks = { scale: num(mk.scale, 0.6, 1.5, 1), gapTop: num(mk.gapTop, 0, 20, 6), gapStack: num(mk.gapStack, 0, 20, 3), gapBottom: num(mk.gapBottom, 0, 20, 6) };
     q.flat = {};
-    Object.keys(BASE).forEach(function (k) { q.flat[k] = p.flat && validFlat(p.flat[k]) ? p.flat[k] : flatten(BASE[k]); });
+    Object.keys(BASE).forEach(function (k) { q.flat[k] = p.flat && own(p.flat, k) && validFlat(p.flat[k]) ? p.flat[k] : flatten(BASE[k]); });
     q.globalOv = cleanOv(p.globalOv, null);
-    q.letterOv = {};
+    q.letterOv = Object.create(null);
     if (p.letterOv && typeof p.letterOv === 'object') Object.keys(p.letterOv).forEach(function (k) {
-      if (q.flat[k]) q.letterOv[k] = cleanOv(p.letterOv[k], q.flat[k]);
+      if (own(q.flat, k)) q.letterOv[k] = cleanOv(p.letterOv[k], q.flat[k]);
     });
-    q.globalExempt = {};
-    if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (BASE[k]) q.globalExempt[k] = true; });
+    q.globalExempt = Object.create(null);
+    if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (hasB(k)) q.globalExempt[k] = true; });
     if (Array.isArray(p.blocks)) {
+      var budget = 20000;   // total preview text: a 200k-character file would freeze the tab
       q.blocks = p.blocks.slice(0, 40).map(function (b) {
-        return block(String((b && b.text) || '').slice(0, 5000), num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
+        var t = String((b && b.text) || '').slice(0, Math.max(0, Math.min(5000, budget)));
+        budget -= t.length;
+        return block(t, num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
       });
     }
     return q;
@@ -3818,7 +4155,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // Lay a block out the same way the preview does: em-sized glyphs, measured
   // spacing, kerning, tracking, word wrap at maxW. Returns placed glyphs.
   function layoutBlock(b, maxW) {
-    var k = b.size / MET.em, trk = b.tr * b.size, space = WORD_EM * b.size + trk;
+    var k = b.size / MET.em, trk = b.tr * b.size, space = wordEm() * b.size + trk;
     var lines = [[]], x = 0, lineW = [0];
     b.text.split(/\s+/).forEach(function (chunk) {
       if (!chunk) return;
@@ -3937,7 +4274,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // Lowercase input maps onto the caps; combining marks are zero-width so
   // decomposed text still lands its accents; kerning goes into a GPOS table.
   function buildOtf() {
-    var UPM = 1000, SC = UPM / MET.em;
+    var UPM = 2000, SC = UPM / MET.em;   // a finer grid halves rounding: smoother curve joins
     var tx = function (x) { return Math.round(x * SC); }, ty = function (y) { return Math.round((MET.base - y) * SC); };
     // cubic outlines, the same curves the preview draws
     function pathOf(rings, dx) {
@@ -3961,14 +4298,15 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       return BlobEngine.signedArea(big) < 0 ? rings : rings.map(function (r) { return r.slice().reverse(); });
     }
     var nd = new opentype.Path(), w = Math.round(UPM * 0.5), hcap = Math.round(UPM * CAP_EM);
-    nd.moveTo(50, 0); nd.lineTo(50, hcap); nd.lineTo(w - 50, hcap); nd.lineTo(w - 50, 0); nd.close();
-    nd.moveTo(100, 50); nd.lineTo(w - 100, 50); nd.lineTo(w - 100, hcap - 50); nd.lineTo(100, hcap - 50); nd.close();
+    var e1 = UPM * 0.05, e2 = UPM * 0.1;   // outer counter-clockwise, inner clockwise (y up)
+    nd.moveTo(e1, 0); nd.lineTo(w - e1, 0); nd.lineTo(w - e1, hcap); nd.lineTo(e1, hcap); nd.close();
+    nd.moveTo(e2, e1); nd.lineTo(e2, hcap - e1); nd.lineTo(w - e2, hcap - e1); nd.lineTo(w - e2, e1); nd.close();
     var glyphs = [
       new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: w, path: nd }),
-      new opentype.Glyph({ name: 'space', unicode: 32, advanceWidth: Math.round(WORD_EM * UPM), path: new opentype.Path() }),
+      new opentype.Glyph({ name: 'space', unicode: 32, advanceWidth: Math.round(wordEm() * UPM), path: new opentype.Path() }),
     ];
     glyphs[1].addUnicode(0xA0);
-    var index = {}, keys = LETTERS.concat(VIET.filter(canDraw));
+    var index = {}, keys = LETTERS.concat(VIET.filter(canDraw), LATIN.filter(canDraw));
     keys.forEach(function (L) {
       var s = spacingOf(L), rings = orient(ringsOf(L));
       var g = new opentype.Glyph({
@@ -3985,7 +4323,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     // anchor is the point on that O where they attach (its ink centre on the
     // cap line, or on the baseline for the dot below); every letter gets the
     // same two anchors at its own ink centre, so GPOS mark-to-base lands an
-    // accent on any letter — even sequences with no precomposed glyph (Q̃).
+    // accent on any letter — even sequences with no precomposed glyph (Q\u0303).
     var o = spacingOf('O'), oPlain = GC.bbox(ringsOf('O')) || [0, 0, GW, GH];
     var oDx = o.lsb - o.x0 - o.adv, markSpec = { classes: { top: [], bottom: [] }, bases: [] }, gdefCls = {};
     MARK_KEYS.forEach(function (m) {
@@ -4025,14 +4363,16 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     keys.forEach(function (a) {
       keys.forEach(function (b) {
         var v = Math.round(kernOf(a, b) * SC);
-        if (state.kernOv[a + '\u0000' + b] != null && v) { pairs.push([index[a], index[b], v]); return; }
-        if (Math.abs(v) >= 8) pairs.push([index[a], index[b], v]);   // under 0.8% em is invisible
+        if (own(state.kernOv, a + '\u0000' + b) && v) { pairs.push([index[a], index[b], v]); return; }
+        if (Math.abs(v) >= UPM * 0.008) pairs.push([index[a], index[b], v]);   // under 0.8% em is invisible
       });
     });
     // drop the name records opentype.js would otherwise fill with a blank
     ['designerURL', 'manufacturerURL', 'license', 'licenseURL', 'trademark'].forEach(function (k) { delete font.names[k]; });
     var buf = font.toArrayBuffer(), extra = {};
     var gpos = FontTables.gpos({ kern: pairs, marks: markSpec }), gdef = FontTables.gdef(gdefCls);
+    var ext = { advMax: 0, minL: 0, minR: 0, xMaxExt: 0 }, yMaxAll = 0, yMinAll = 0;
+    var fontAsc = Math.round(UPM * ASC_EM), fontDesc = -Math.round(UPM * DESC_EM);
     // hmtx: opentype.js 1.3.4 ignores leftSideBearing, so write xMin per glyph
     var hmtx = FontTables.readTable(buf, 'hmtx'), hhea = FontTables.readTable(buf, 'hhea');
     if (hmtx && hhea) {
@@ -4040,6 +4380,11 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       var nh = new DataView(hhea.buffer, hhea.byteOffset, hhea.byteLength).getUint16(34);
       glyphs.forEach(function (g, i) {
         var bb = g.path.commands.length ? g.getBoundingBox() : null, lsb = bb ? Math.round(bb.x1) : 0;
+        ext.advMax = Math.max(ext.advMax, g.advanceWidth || 0);
+        if (bb) {
+          ext.minL = Math.min(ext.minL, lsb); ext.minR = Math.min(ext.minR, Math.round((g.advanceWidth || 0) - bb.x2));
+          ext.xMaxExt = Math.max(ext.xMaxExt, Math.round(bb.x2)); yMaxAll = Math.max(yMaxAll, Math.round(bb.y2)); yMinAll = Math.min(yMinAll, Math.round(bb.y1));
+        }
         var at = i < nh ? i * 4 + 2 : nh * 4 + (i - nh) * 2;
         if (at + 2 <= hmtx.length) hd.setInt16(at, lsb);
       });
@@ -4056,12 +4401,45 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       od.setUint16(62, od.getUint16(62) | 0x80);
       od.setInt16(72, 0);   // sTypoLineGap
       od.setUint32(78, od.getUint32(78) | 1 | (1 << 8));   // code pages: Latin 1 + Vietnamese (1258)
+      // Windows metrics = hhea/typo (both already cover every glyph's ink)
+      od.setUint16(74, Math.max(fontAsc, yMaxAll)); od.setUint16(76, Math.max(-fontDesc, -yMinAll));
       extra['OS/2'] = os2;
+    }
+    // hhea extents opentype.js leaves at 0: advanceWidthMax, minLSB, minRSB, xMaxExtent
+    if (hhea) {
+      var hv = new DataView(hhea.buffer, hhea.byteOffset, hhea.byteLength);
+      hv.setUint16(10, ext.advMax); hv.setInt16(12, ext.minL); hv.setInt16(14, ext.minR); hv.setInt16(16, ext.xMaxExt);
+      extra.hhea = hhea;
     }
     buf = FontTables.injectTables(buf, extra);
     dl(new Blob([buf], { type: 'font/otf' }), safeName() + '.otf');
     return glyphs.length;
   }
+
+  // a small read-only window into the engine, for tests and the console
+  window.LiquidFont = {
+    kern: function (a, b) { return kernOf(a, b); },
+    spacing: function (L) { var s = spacingOf(L); return { lsb: s.lsb, rsb: s.rsb, adv: s.adv, x0: s.x0, x1: s.x1 }; },
+    metrics: function () { return { base: MET.base, cap: MET.cap, em: MET.em, ascender: ASC_EM, descender: DESC_EM }; },
+    glyphs: function () { return LETTERS.concat(VIET, LATIN); },
+    // true 2D distance between the inks of a set pair, glyph units (tests)
+    pairGap: function (a, b) {
+      var A = spacingOf(a), B = spacingOf(b), shift = A.adv + kernOf(a, b) - (B.x0 - B.lsb) + (A.x0 - A.lsb);
+      var ra = ringsOf(a), rb = GC.shift(ringsOf(b), shift, 0), ba = GC.bbox(ra), bb = GC.bbox(rb);
+      if (!ba || !bb) return Infinity;
+      var best = Infinity;
+      ra.forEach(function (r) { r.forEach(function (p) {
+        if (p[0] < bb[0] - 20) return;
+        rb.forEach(function (q) { for (var k = 0; k < q.length; k++) {
+          var u = q[k], v = q[(k + 1) % q.length], dx = v[0] - u[0], dy = v[1] - u[1], l2 = dx * dx + dy * dy;
+          var t = l2 ? Math.max(0, Math.min(1, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / l2)) : 0;
+          var d = Math.hypot(p[0] - u[0] - t * dx, p[1] - u[1] - t * dy);
+          if (d < best) best = d;
+        } });
+      }); });
+      return best;
+    },
+  };
 
   // -------------------------------------------------------------------- boot
   var restored = false;
