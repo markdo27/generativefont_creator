@@ -37,7 +37,7 @@
           <button class="mini-btn" id="btnZoomIn" type="button" aria-label="Zoom in">+</button>
           <button class="mini-btn" id="btnFit" type="button" title="Fit the glyph in the canvas">Fit</button>
         </div>
-        <div class="readout" id="editorReadout" aria-live="polite">Click a node, then drag to move it — or drag its orange rim to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
+        <div class="readout" id="editorReadout" aria-live="polite">Click a node, then drag to move it — or drag its marching ring to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
         <div class="global-warn" id="globalWarn" hidden>Global is on: a drag moves the node with the same number in every letter.</div>
 
         <div class="node-inspector" id="nodeInspector">
@@ -107,7 +107,7 @@
 
         <details class="editor-hint">
           <summary>How editing works</summary>
-          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its orange rim to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. Vietnamese letters are built from a base letter plus shared marks: select one and the brown mark nodes edit that mark everywhere it is used. MELT controls how much neighbouring blobs fuse.
+          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its marching ring to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. Vietnamese letters are built from a base letter plus shared marks: select one and the grey mark nodes edit that mark everywhere it is used. MELT controls how much neighbouring blobs fuse.
         </details>
       </aside>
 

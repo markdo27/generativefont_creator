@@ -15,7 +15,8 @@
   };
   var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
 
-  var PALETTE = ['#ffffff', '#ff5000', '#000000', '#8a8a8a'];
+  // preview inks, a tonal ramp; black flips the previews to paper
+  var PALETTE = ['#ffffff', '#c4c4c4', '#8a8a8a', '#000000'];
 
   // Vertical metrics, as fractions of the em. Caps fill 70% of it; above them
   // is room for Vietnamese stacked marks (Ẩ Ẫ Ặ climb ~0.4em over the caps),
@@ -791,7 +792,7 @@
     var color = state.ink === '#000000' ? '#fff' : state.ink;
     glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (cell) {
       var L = cell.dataset.letter, svg = cell.firstChild;
-      cell.style.color = color;
+      cell.style.setProperty('--cell-ink', color);
       if (svg) setFrame(svg, L, cellSize);
       else cell.appendChild(glyphSvg(L, cellSize, 'cell'));
       cell.classList.toggle('edited', isEdited(L));
@@ -881,7 +882,7 @@
     if (canDraw(L)) {
       var sp = spacingOf(L); ax0 = sp.x0 - sp.lsb; ax1 = ax0 + sp.adv;
       [ax0, ax1].forEach(function (x) {
-        edSvg.appendChild(mkEl('line', { x1: x, y1: vy, x2: x, y2: vy + span, stroke: 'rgba(255,80,0,0.45)', 'stroke-width': 1 / z }));
+        edSvg.appendChild(mkEl('line', { x1: x, y1: vy, x2: x, y2: vy + span, stroke: 'rgba(255,255,255,0.4)', 'stroke-width': 1 / z }));
       });
     }
 
@@ -902,8 +903,9 @@
         if (c.length < 2) return;
         edSvg.appendChild(mkEl('path', {
           d: 'M' + c.map(function (n) { return (n[0] * s + p.ox).toFixed(1) + ',' + (n[1] * s + p.oy).toFixed(1); }).join('L'),
-          fill: 'none', stroke: p.zone === 'base' ? '#6a6a6a' : '#8a5a3a', 'stroke-width': 0.9 / z,
-          'stroke-dasharray': (3 / z) + ' ' + (2.5 / z),
+          // base skeleton dashed, shared-mark skeleton dotted
+          fill: 'none', stroke: p.zone === 'base' ? '#6a6a6a' : '#a0a0a0', 'stroke-width': 0.9 / z,
+          'stroke-dasharray': p.zone === 'base' ? (3 / z) + ' ' + (2.5 / z) : (0.9 / z) + ' ' + (1.8 / z),
         }));
       });
     });
@@ -914,10 +916,13 @@
       var act = i === state.activeNode;
       if (act) {
         var rr = n.r * state.mass;
-        edSvg.appendChild(mkEl('circle', {
+        var ring = mkEl('circle', {
           cx: n.x, cy: n.y, r: rr, fill: 'none',
-          stroke: '#ff5000', 'stroke-width': 1.1 / z, 'stroke-dasharray': (3 / z) + ' ' + (2 / z), opacity: 0.95,
-        }));
+          stroke: '#ffffff', 'stroke-width': 1.1 / z, 'stroke-dasharray': (3 / z) + ' ' + (2 / z), opacity: 0.95,
+        });
+        ring.setAttribute('class', 'rim-ring');   // marches: one dash + gap per cycle
+        ring.style.setProperty('--dash-cycle', (5 / z).toFixed(3));
+        edSvg.appendChild(ring);
         var g = mkEl('circle', { cx: n.x + rr, cy: n.y, r: 4.2 / z });
         g.setAttribute('class', 'rim-grip');
         g.setAttribute('stroke-width', 1.8 / z);
@@ -1128,8 +1133,8 @@
     var info = isMark(L) && GC.MARKS[L];
     readout.textContent = info
       ? info.name + ' (' + info.vi + '): every letter that carries it changes with it. Shown on ' + markHost(L) + ' for context.'
-      : (FLAT[L] ? 'Click a node, then drag to move it, or drag its orange rim to swell / pinch the stroke.'
-                 : L + ' is built from its base letter and marks: drag a base node to edit the letter, a brown mark node to edit the shared mark.');
+      : (FLAT[L] ? 'Click a node, then drag to move it, or drag its marching ring to swell / pinch the stroke.'
+                 : L + ' is built from its base letter and marks: drag a base node to edit the letter, a grey mark node to edit the shared mark.');
     glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (c) {
       var on = c.dataset.letter === L;
       c.classList.toggle('selected', on);
@@ -1367,7 +1372,7 @@
       + ' — arrows move it (shift ×10), alt+arrows resize';
   }
   edWrap.addEventListener('focusout', function () {
-    if (state.activeNode < 0) readout.textContent = 'Click a node, then drag to move it, or drag its orange rim to swell / pinch the stroke.';
+    if (state.activeNode < 0) readout.textContent = 'Click a node, then drag to move it, or drag its marching ring to swell / pinch the stroke.';
   });
   edWrap.addEventListener('keydown', function (e) {
     var n = EDV.nodes.length, i = state.activeNode;
@@ -1734,7 +1739,7 @@
       if (!chunk) return;
       var word = [], wx = 0, prev = null;
       GC.clusters(chunk).forEach(function (L) {
-        if (!canDraw(L)) {   // the same orange box the preview shows
+        if (!canDraw(L)) {   // the same dashed box the preview shows
           if (prev || word.length) wx += trk;
           word.push({ notdef: true, x: wx, w: 0.42 * b.size });
           wx += 0.42 * b.size; prev = null; return;
@@ -1769,7 +1774,7 @@
         line.forEach(function (g) {
           if (g.notdef) {
             body += '<rect x="' + (pad + g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - CAP_EM * b.size).toFixed(1) + '" width="' + (g.w * 0.8).toFixed(1) +
-              '" height="' + (CAP_EM * b.size).toFixed(1) + '" rx="3" fill="none" stroke="#ff5000" stroke-width="2"/>';
+              '" height="' + (CAP_EM * b.size).toFixed(1) + '" rx="3" fill="none" stroke="' + ink + '" stroke-width="2" stroke-dasharray="6 4"/>';
             return;
           }
           used[g.L] = 1;

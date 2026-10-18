@@ -114,6 +114,30 @@ automatic kerning.
   Exports PNG at 1–3× and SVG (vector outline + each Google font inlined as a
   base64 `@font-face` subset containing only the glyphs actually used).
 
+## Design language
+
+Both tools are strictly black and white, the same as the type they make. No
+hue carries meaning; emphasis comes from inversion and motion (tokens at the
+top of `styles.css`, all of it switched off under *reduce motion*):
+
+- **Invert**: selection, on-states, focus, toasts and labels such as the
+  glyph badge or *Manual* kern turn white with black text. The selected
+  glyph in the character set is printed in negative.
+- **Ink wipe**: an inverted state floods in from the left like ink running
+  along a stroke. Toggles wipe when switched on; action buttons wipe on hover.
+- **Liquid fill**: the main action (*Export OTF*, *PNG*) fills from below
+  with a turning meniscus. A difference blend inverts exactly what it covers,
+  label included. The fill stays full while an export is pouring.
+- **Drip**: the full stop in the wordmark now and then swells, drops a bead
+  and settles.
+- **March / breathe**: things to drag or feed say so by moving: the selected
+  node's radius ring marches, and a poster waiting for its font file has a
+  breathing drop zone.
+- On the poster canvas the selection box is white dashes on a black line, so it
+  reads on any poster colour. The palette presets are monochrome (Paper,
+  Noir, Print, Graphite, Ash, Smoke, plus grey and paper ramps). Any other
+  colour is one custom pick away.
+
 ## Rebuilding
 
 ```
@@ -125,8 +149,8 @@ regenerates `index.html` from the current source files.
 ## Editing glyphs
 
 Open `index.html` in a browser. Click a letter in the character set, drag
-its nodes to reshape the letter (drag a node's orange rim to change stroke
-thickness at that point), or use the X/Y/R fields and Add/Delete Node
+its nodes to reshape the letter (drag a selected node's marching ring to
+change stroke thickness at that point), or use the X/Y/R fields and Add/Delete Node
 controls for finer control. Toggle Global Edit to apply a change to every
 glyph sharing that node index, or Mirror to mirror edits across the
 vertical axis. The canvas shows the measured baseline, cap height, ascender,
@@ -156,12 +180,13 @@ above, macron, cedilla and ogonek are mark glyphs too, and the app computes
 every precomposed capital the current marks can build (Ä Å Ç Č Ñ Š Ž Ę …),
 lists them in the *Latin* row and exports them.
 
-Selecting a Vietnamese letter in the editor shows its base nodes (grey) and
-its mark nodes (brown): dragging a mark node edits that mark in every letter
+Selecting a Vietnamese letter in the editor shows its base nodes (hollow, on a
+dashed skeleton) and its mark nodes (grey-filled, on a dotted skeleton):
+dragging a mark node edits that mark in every letter
 that uses it. *Mark size* and *Mark gap* in the editor panel tune all marks at
 once. Text is normalised, so precomposed (NFC) and decomposed (NFD) input,
-upper or lower case, all render; anything the font can't draw yet shows as an
-orange box and is listed in a toast instead of vanishing.
+upper or lower case, all render; anything the font can't draw yet shows as a
+dashed box and is listed in a toast instead of vanishing.
 
 ## Spacing, metrics and kerning
 
