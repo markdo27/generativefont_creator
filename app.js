@@ -1754,14 +1754,32 @@
       index[L] = glyphs.length;
       glyphs.push(g);
     });
-    // zero-width combining marks, drawn left of the origin over a cap O
-    var o = spacingOf('O');
+    // zero-width combining marks, drawn left of the origin over a cap O. Their
+    // anchor is the point on that O where they attach (its ink centre on the
+    // cap line, or on the baseline for the dot below); every letter gets the
+    // same two anchors at its own ink centre, so GPOS mark-to-base lands an
+    // accent on any letter — even sequences with no precomposed glyph (Q̃).
+    var o = spacingOf('O'), oPlain = GC.bbox(ringsOf('O')) || [0, 0, GW, GH];
+    var oDx = o.lsb - o.x0 - o.adv, markSpec = { classes: { top: [], bottom: [] }, bases: [] }, gdefCls = {};
     MARK_KEYS.forEach(function (m) {
       var pl = markPlacement(m), rings = orient(GC.shift(ringsOf(m), pl.ox, pl.oy));
       var g = new opentype.Glyph({ name: glyphName(m), unicode: m.codePointAt(0), advanceWidth: 0,
-        path: pathOf(rings, o.lsb - o.x0 - o.adv) });
+        path: pathOf(rings, oDx) });
+      var zone = GC.MARKS[m].zone, gidM = glyphs.length;
+      if (zone === 'top' || zone === 'bottom') {
+        markSpec.classes[zone].push([gidM, tx((oPlain[0] + oPlain[2]) / 2 + oDx), ty(zone === 'top' ? MET.cap : MET.base)]);
+        gdefCls[gidM] = 3;
+      }
       glyphs.push(g);
     });
+    LETTERS.forEach(function (L) {
+      if (!ALNUM.test(L)) return;
+      var sp = spacingOf(L), pb = GC.bbox(ringsOf(L));
+      if (!pb) return;
+      var cx = tx((pb[0] + pb[2]) / 2 + sp.lsb - sp.x0);
+      markSpec.bases.push([index[L], { top: [cx, ty(MET.cap)], bottom: [cx, ty(MET.base)] }]);
+    });
+    keys.forEach(function (L) { gdefCls[index[L]] = 1; });
     var family = (state.fontName || 'Untitled').trim() || 'Untitled';
     // the PostScript / CFF name must be printable ASCII without ()[]{}<>/%
     // and spaces, or browsers' font sanitiser rejects the whole file
@@ -1786,7 +1804,8 @@
     });
     // drop the name records opentype.js would otherwise fill with a blank
     ['designerURL', 'manufacturerURL', 'license', 'licenseURL', 'trademark'].forEach(function (k) { delete font.names[k]; });
-    var buf = font.toArrayBuffer(), extra = {}, gpos = FontTables.gposKern(pairs);
+    var buf = font.toArrayBuffer(), extra = {};
+    var gpos = FontTables.gpos({ kern: pairs, marks: markSpec }), gdef = FontTables.gdef(gdefCls);
     // hmtx: opentype.js 1.3.4 ignores leftSideBearing, so write xMin per glyph
     var hmtx = FontTables.readTable(buf, 'hmtx'), hhea = FontTables.readTable(buf, 'hhea');
     if (hmtx && hhea) {
@@ -1800,6 +1819,7 @@
       extra.hmtx = hmtx;
     }
     if (gpos) extra.GPOS = gpos;
+    if (gdef) extra.GDEF = gdef;
     // OS/2 v4 with USE_TYPO_METRICS, so every platform lays lines out from
     // the measured ascender/descender (which cover the Vietnamese stacks)
     var os2 = FontTables.readTable(buf, 'OS/2');
