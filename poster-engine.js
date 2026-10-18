@@ -1635,6 +1635,8 @@
   }
   function fk(el, key) { el.dataset.fk = key; return el; }
 
+  function onHeadButton(e) { return !!(e.target && e.target.closest && e.target.closest('.icon-btn')); }
+
   function renderBigRowCards() {
     var list = $('bigRowList');
     list.innerHTML = '';
@@ -1645,9 +1647,12 @@
       card._id = row.id;
       card.setAttribute('role', 'group');
       card.setAttribute('aria-label', 'Title ' + name.toLowerCase());
-      card.addEventListener('mousedown', function () { select('row', row.id); });
-      // tabbing into a collapsed card opens it, like clicking it does
-      card.addEventListener('focusin', function () { select('row', row.id); });
+      // tabbing into a collapsed card opens it, like clicking it does. Not for
+      // its header buttons: opening this card collapses the one above, which
+      // moves the button out from under the pointer mid-click and the click
+      // (delete, move up) was silently lost.
+      card.addEventListener('mousedown', function (e) { if (!onHeadButton(e)) select('row', row.id); });
+      card.addEventListener('focusin', function (e) { if (!onHeadButton(e)) select('row', row.id); });
 
       var head = cardHead(name, rowMetaText(row));
       card._meta = head._meta;
@@ -1779,8 +1784,8 @@
       card._id = b.id;
       card.setAttribute('role', 'group');
       card.setAttribute('aria-label', 'Small text block ' + (idx + 1));
-      card.addEventListener('mousedown', function () { select('block', b.id); });
-      card.addEventListener('focusin', function () { select('block', b.id); });
+      card.addEventListener('mousedown', function (e) { if (!onHeadButton(e)) select('block', b.id); });
+      card.addEventListener('focusin', function (e) { if (!onHeadButton(e)) select('block', b.id); });
 
       var firstLine = (b.text.split('\n')[0] || '').slice(0, 18);
       var head = cardHead(name, firstLine);
@@ -2461,6 +2466,9 @@
     state.glyph = { preset: 'liquid' };
     SHAPE_KEYS.forEach(function (k) { state.glyph[k] = finite(lp[k]) ? lp[k] : GLYPH_PRESETS.liquid[k]; });
     link.use = true; link.shape = true; link.saved = null;
+    // stock accent spacing too, so applyLinkShape parks the stock values (not
+    // a previous project's) for when the user opts out of the match
+    if (GC && DEFAULT_LAYOUT) Object.keys(DEFAULT_LAYOUT).forEach(function (k) { GC.LAYOUT[k] = DEFAULT_LAYOUT[k]; });
     srcVer++;
     builtinCache = {}; layoutCache = {};
     applyLinkShape();

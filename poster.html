@@ -191,12 +191,23 @@
           </div>
         </section>
 
+        <!-- ---------------------------------------------------- saved poster -->
+        <section class="pgroup">
+          <h2 class="pgroup-title">Saved poster</h2>
+          <p class="phint" id="saveHint">Autosaved in this browser: title rows, small text, poster size, colours, typeface and finish. An uploaded font file is not stored.</p>
+          <div class="prow prow-baseline">
+            <span class="spacer"></span>
+            <button type="button" class="mini-btn reset-btn" id="btnResetPoster" aria-describedby="saveHint" title="Back to the starting layout (forgets the saved poster)">Reset poster</button>
+          </div>
+        </section>
+
       </aside>
 
       <section class="poster-stage" id="posterStage">
         <div class="stage-bar">
           <div class="stage-meta" id="stageMeta"></div>
           <div class="stage-spacer"></div>
+          <div class="stage-loading" id="stageLoading" aria-hidden="true">Rendering&hellip;</div>
           <div class="zoom-cluster">
             <button type="button" class="mini-btn" id="btnZoomOut" title="Zoom out" aria-label="Zoom out">&minus;</button>
             <input type="range" id="zoomRange" min="5" max="200" step="1" title="Zoom" aria-label="Zoom" />
@@ -214,13 +225,16 @@
         </div>
         <!-- In flow under the stage, so it can never sit on top of the poster. -->
         <div class="stage-foot">
-          <p class="stage-hint" id="stageHint">
-            <span>Drag to move</span> <span>&middot; corners resize</span> <span>&middot; top handle rotates (<kbd>Shift</kbd> snaps 15&deg;)</span>
-            <span>&middot; <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&rarr;</kbd><kbd>&darr;</kbd> nudge (<kbd>Shift</kbd> = bigger steps)</span>
-            <span>&middot; <kbd>[</kbd> <kbd>]</kbd> rotate 1&deg; (<kbd>Shift</kbd> 15&deg;)</span>
-            <span>&middot; drag empty space to pan</span> <span>&middot; <kbd>&#8984;</kbd>/<kbd>Ctrl</kbd> + scroll to zoom</span>
-          </p>
-          <div class="stage-loading" id="stageLoading" aria-hidden="true">Rendering&hellip;</div>
+          <ul class="stage-hint" id="stageHint" aria-label="Canvas controls">
+            <li>Drag to move</li>
+            <li>Corners resize</li>
+            <li>Top handle rotates</li>
+            <li><kbd>&larr;&uarr;&rarr;&darr;</kbd> nudge</li>
+            <li><kbd>[</kbd>&thinsp;<kbd>]</kbd> rotate</li>
+            <li><kbd>Shift</kbd> bigger steps, 15&deg; snaps</li>
+            <li>Drag the backdrop to pan</li>
+            <li><kbd>&#8984;</kbd>/<kbd>Ctrl</kbd> + scroll zooms</li>
+          </ul>
         </div>
       </section>
     </main>

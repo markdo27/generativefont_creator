@@ -81,6 +81,11 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 }
 .dropzone:hover { border-color: var(--accent); color: var(--fg); }
 .dropzone.has-font { border-style: solid; border-color: var(--accent); color: var(--fg); }
+/* a restored poster waiting for its font file to be uploaded again */
+.dropzone.needs-font { border-color: var(--accent); color: var(--fg); }
+
+/* Reset poster: the first press arms it, the second resets */
+.reset-btn.armed { color: #000; background: var(--accent); border-color: var(--accent); }
 /* the file input is visually hidden but focusable: ring the whole zone */
 .dropzone:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; color: var(--fg); }
 
@@ -127,6 +132,15 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .item-card.selected .item-card-head .meta { color: var(--muted); }
+/* overflow note next to the row meta ("▲ wider than poster"); never squeezed
+   out by the meta, which ellipsizes first */
+.item-card-head > span:first-child { flex: 0 0 auto; white-space: nowrap; }
+.item-card-head .row-warn {
+  flex: 0 0 auto; white-space: nowrap;
+  font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: none; color: var(--accent);
+  cursor: help;
+}
+.item-card-head .meta { flex: 0 1 auto; }
 .icon-btn {
   border: 1px solid var(--line); background: var(--panel); color: var(--muted);
   font-family: var(--mono); font-size: var(--fs-s); line-height: 1;
@@ -208,7 +222,7 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .poster-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; background: #050505; }
 
 .stage-bar {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; position: relative;
   height: 40px; min-height: 40px; padding: 0 16px;
   border-bottom: 1px solid var(--line); background: var(--surface);
 }
@@ -247,29 +261,34 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
 .canvas-holder #overlayCanvas.rotating { cursor: crosshair; }
 
 /* Hint strip under the stage: part of the column's flow (the scroll area
-   shrinks to make room), so the poster is never drawn underneath it. Phrases
-   wrap as whole units, never mid-phrase. */
+   shrinks to make room), so the poster is never drawn underneath it. Each
+   control is one list item and wraps as a whole, never mid-phrase. */
 .stage-foot {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 7px 16px 8px; min-height: 30px;
+  padding: 7px 16px 8px;
   border-top: 1px solid var(--line); background: var(--surface);
 }
+/* Briefly covers the size readout at the left of the stage bar: it takes no
+   room from the zoom controls and never lands on the poster. */
 .stage-loading {
-  flex: 0 0 auto; margin-left: auto;
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 1;
+  display: flex; align-items: center; padding: 0 14px 0 16px; background: var(--surface);
   font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; color: var(--accent);
   letter-spacing: 0.08em; text-transform: uppercase; opacity: 0; transition: opacity 0.15s;
   pointer-events: none; white-space: nowrap;
 }
 .stage-loading.show { opacity: 1; }
+.stage-meta { transition: opacity 0.15s; }
+.stage-bar:has(.stage-loading.show) .stage-meta { opacity: 0; }
 .stage-hint {
-  flex: 1 1 auto; min-width: 0; margin: 0;
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: wrap; gap: 2px 16px;
   font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; color: var(--muted);
   letter-spacing: 0.04em;
 }
-.stage-hint > span { white-space: nowrap; }
+.stage-hint > li { white-space: nowrap; }
 .stage-hint kbd {
   font-family: var(--mono); font-size: inherit; color: var(--fg);
-  border: 1px solid var(--line); border-radius: 2px; padding: 0 3px; margin: 0 1px;
+  border: 1px solid var(--line); border-radius: 2px; padding: 0 2px;
   background: var(--panel);
 }
 
@@ -294,9 +313,8 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   .control-bar { position: sticky; bottom: 0; z-index: 5; padding: 10px 16px; }
 }
 @media (max-width: 600px) {
-  /* touch screens: no keyboard to describe; the strip only flags renders */
-  .stage-meta, .stage-hint { display: none; }
-  .stage-foot { min-height: 0; padding: 4px 12px; }
+  /* touch screens: no keyboard or scroll wheel for the hint strip to describe */
+  .stage-meta, .stage-foot { display: none; }
   .zoom-cluster input[type=range] { width: 80px; }
 }
 
