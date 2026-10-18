@@ -129,7 +129,9 @@
   function markChains(key, chains) {
     var s = LAYOUT.scale;
     if (!isMark(key) || MARKS[key].zone === 'fused' || s === 1) return chains;
-    return chains.map(function (c) { return c.map(function (n) { return [n[0] * s, n[1] * s, n[2] * s]; }); });
+    return chains.map(function (c) {
+      return c.map(function (n) { var o = n.slice(); o[0] *= s; o[1] *= s; o[2] *= s; return o; });   // keeps a hard-union flag
+    });
   }
 
   // Text -> display clusters: one base letter plus its combining marks, NFC,
@@ -339,10 +341,18 @@
       var mr = api.rings(m), mb = bbox(mr);
       if (!mb) return;
       var bx2 = RIGHT_FOOT[m] ? pb[2] - (mb[2] - mb[0]) * 0.6 : ax, st;
-      if (TIGHT_BOTTOM[m]) {   // overlaps the foot slightly, so it reads attached
-        var oy0 = bb[3] - LAYOUT.clear - mb[1];
+      // the foot under the mark itself: an ogonek under a round U or O must
+      // hang from the curve there, not from the glyph's lowest point
+      var foot = localExtent(baseRings, bx2 + (mb[0] + mb[2]) / 2, Math.max(4, (mb[2] - mb[0]) / 2))[1];
+      var hasFoot = foot > -1e8 && foot > bb[3] - 0.12 * (bb[3] - bb[1]);
+      if (TIGHT_BOTTOM[m] && hasFoot) {   // overlaps the foot slightly, so it reads attached
+        var oy0 = foot - LAYOUT.clear - mb[1];
         st = { oy: oy0, placed: shift(mr, bx2, oy0) };
-      } else st = settle(mr, bx2, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
+      } else {
+        // nothing to attach to (Ķ Ņ Ŗ: the gap between the feet) — hang it
+        // free below the foot line, like the Latvian comma below
+        st = settle(mr, bx2, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
+      }
       out = out.concat(st.placed);
       parts.push({ key: m, ox: bx2, oy: st.oy, zone: 'bottom' });
       bottom = bbox(st.placed)[3];

@@ -129,7 +129,16 @@ BOWL_B = bot_y(14, 1.5)
 
 G['A'] = [[[40, -2, 11], [27, 44, 11], [10, 94, 20]],            # apex split in two: a wider,
           [[52, -2, 11], [65, 44, 11], [82, 94, 20]],            # sturdier counter top; lean
-          [[19, 76, 10.5], [73, 76, 10.5]]]                      # legs + bar keep it open in molten
+          [[19, 79, 13.7], [73, 79, 13.7]]]                      # legs keep it open in molten
+# (A's bar has a crossbar's weight but sits low, so its top edge and the counter stay put.)
+# Horizontals are balanced against the stems (liquid ink, vs H's stem): arms
+# ~0.9x, crossbars ~0.85x. The E/F/L arms pinch to a mid node and swell again
+# to the terminal, keeping the top/base edge where it was.
+ARM = 14.5
+ARM_T = [46, R(6.96 - (17.08 - ARM) * LIQ_MASS), ARM]           # top arm mid node, same top edge
+ARM_B = [48, R(flat_bot(ARM) - 1.4), ARM]   # foot arm mid node, a hair up off the base: on it, the stem's
+                                            # turn into the arm fell under 75 deg and the corner went soft
+BAR = 13.3                                                       # E F crossbars
 G['B'] = [[[20, 6, 19], [19, 49, 13], [20, 94, 20]],
           [[20, 6, 19], [42, top_y(13.5, 1.5), 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12],
            [22, 48, 11.5]],
@@ -140,18 +149,18 @@ G['C'] = [sell(47, OCY, 32, ORY, [-36, -90, -135, -180, -225, -270, -324], 16.5,
 G['D'] = [[[20, 6, 19], [19, 50, 15], [20, 94, 20]],
           [[20, 6, 19], [44, BOWL_T, 14], [65, 8, 15], [77, 28, 16.5], [79, 50, 17], [77, 72, 16.5],
            [65, 92, 15], [44, BOWL_B, 14], [20, 94, 20]]]
-G['E'] = [[[72, 8, 15], [22, 6, 19], [19, 50, 15], [22, 94, 20], [74, flat_bot(15.5), 15.5]],
-          [[20, 50, 13], [60, 50, 13]]]
-G['F'] = [[[20, 94, 20], [19, 50, 15], [22, 6, 19], [72, 8, 15]],
-          [[20, 52, 13], [60, 52, 13]]]
+G['E'] = [[[72, 8, 15], ARM_T, [22, 6, 19], [19, 50, 15], [22, 94, 20], ARM_B, [74, flat_bot(15.5), 15.5]],
+          [[20, 50, BAR], [60, 50, BAR]]]
+G['F'] = [[[20, 94, 20], [19, 50, 15], [22, 6, 19], ARM_T, [72, 8, 15]],
+          [[20, 52, BAR], [60, 52, BAR]]]
 _g = sell(47, OCY, 32, ORY, [-48, -90, -135, -180, -225, -270, -315], 16.5, 15, 2.3, 15)
 G['G'] = [_g + [[79, 75, 15.5], [79, 58, 13.5], [56, 58, 11.5]]]
-G['H'] = [STEM_L, STEM_R, [[20, 50, 13], [72, 50, 13]]]
+G['H'] = [STEM_L, STEM_R, [[20, 50, 13.8], [72, 50, 13.8]]]     # longer bar: a hair heavier to read 0.85
 G['I'] = [[[46, 6, 19], [45, 50, 15], [46, 94, 20]]]
 G['J'] = [[[64, 6, 19], [64, 40, 15], [63, 66, 15.5], [56, 88, 15.5], [38, bot_y(15), 15],
            [22, 95, 15], [12, 77, 16]]]
 G['K'] = [STEM_L, [[76, flat_top(17), 17], [22, 54, 13.5]], [[38, 45, 13.5], [78, flat_bot(18), 18]]]
-G['L'] = [[[20, 6, 19], [19, 50, 15], [22, 94, 20], [74, flat_bot(15.5), 15.5]]]
+G['L'] = [[[20, 6, 19], [19, 50, 15], [22, 94, 20], ARM_B, [74, flat_bot(15.5), 15.5]]]
 
 
 def along(a, b, t, r):
@@ -219,7 +228,8 @@ G['6'] = [[[72, 12, 15], [56, top_y(14.5), 14.5], [37, 3, 15], [22, 18, 15.5], [
            [22, 86, 15.5], [40, bot_y(14.5), 14.5], [60, 98, 14.5], [75, 84, 15.5], [77, 66, 15.5],
            [66, 51, 14], [46, 46, 13.5], [27, 52, 14], [16, 64, 15]]]
 G['7'] = [[[12, flat_top(15.5), 15.5], [80, flat_top(15.5), 15.5], [56, 50, 14], [40, flat_bot(18), 18]]]
-_t8 = loop(46, (top_y(13.5) + 50) / 2, 22, (50 - top_y(13.5)) / 2, 14, 13.5)
+_t8 = loop(46, (top_y(13.5) + 50) / 2, 23, (50 - top_y(13.5)) / 2, 13, 12.5)   # top bowl lighter, so
+                                                     # its counter holds ~0.15 O's in the heavy states
 _b8 = loop(46, (46 + bot_y(14.5)) / 2, 26, (bot_y(14.5) - 46) / 2, 15, 14.5)
 G['8'] = [_t8, _b8]
 G['9'] = rot180(G['6'], cy=(top_y(14.5) + bot_y(14.5)) / 2)
@@ -255,9 +265,11 @@ G['*'] = _ast
 G['#'] = [[[33, 2, 11.5], [21, 100, 11.5]], [[72, 2, 11.5], [60, 100, 11.5]],
           [[5, 28, 11.5], [92, 28, 11.5]], [[0, 74, 11.5], [87, 74, 11.5]]]
 G['%'] = [loop(22, 25, 15, 21, 11, 10, 8), [[76, 0, 13], [16, 102, 13]], loop(70, 77, 15, 21, 11, 10, 8)]
-G['@'] = [loop(46, 55, 15, 18.5, 9.5, 9, 8),                      # wider than a cap, like most @s
-          [[63, 40, 10.5], [63, 64, 11], [67, 73, 11], [76, 77, 11], [87, 72, 11.5], [95, 55, 12],
-           [94, 32, 12.5], [82, 11, 12.5], [60, -1, 12], [34, 0, 12.5], [11, 11, 12.5], [-3, 34, 13],
+# @: wider than a cap, like most @s; the a's bowl is big and light, so its
+# counter holds ~0.15 O's in the heavy states
+G['@'] = [loop(46, 55, 17, 21, 9, 8.5, 8),
+          [[65, 40, 10.5], [65, 64, 11], [69, 73, 11], [78, 77, 11], [89, 72, 11.5], [97, 55, 12],
+           [96, 32, 12.5], [84, 11, 12.5], [62, -1, 12], [34, 0, 12.5], [11, 11, 12.5], [-3, 34, 13],
            [-4, 62, 13], [5, 87, 12.5], [25, 102, 12], [47, 106, 11.5], [65, 103, 11]]]
 G['\u2013'] = [[[14, 51, 14], [78, 51, 14]]]                      # en dash
 G['\u2014'] = [[[-14, 51, 14], [106, 51, 14]]]                    # em dash
@@ -317,13 +329,13 @@ G['\u00D8'] = [sloop(46, OCY, 33, ORY, 16.5, 15),
 # the A's counter or crowded the E's lower arm in molten.
 G['\u00C6'] = [[[0, 94, 20], [16, 50, 10], [32, flat_top(14.5), 14.5], [66, 6, 17], [101, 8, 15]],
                [[66, 6, 17], [65, 50, 13], [66, 94, 20], [103, flat_bot(15.5), 15.5]],
-               [[67, 52, 13], [97, 52, 13]],
-               [[10, 72, 10.5], [66, 72, 11]]]
+               [[67, 52, BAR], [97, 52, BAR]],
+               [[10, 74.4, 13], [66, 74.4, 13]]]
 # OE: a half O closed by the E's stem; one counter.
 _oe = sell(42, OCY, 36, ORY, [-90, -135, -180, -225, -270], 16.5, 15, 2.3)
 G['\u0152'] = [[[104, 8, 15], [66, 6, 18]] + _oe + [[66, 94, 20], [106, flat_bot(15.5), 15.5]],
                [[66, 6, 18], [65, 50, 14], [66, 94, 20]],
-               [[67, 50, 13], [100, 50, 13]]]
+               [[67, 50, BAR], [100, 50, BAR]]]
 # pound: hooked top, the stem bends into the baseline bar, a bar across it
 G['\u00A3'] = [[[78, 24, 14], [70, 7, 13.5], [53, top_y(13.5), 13.5], [36, 6, 14], [27, 24, 14.5], [26, 50, 15],
                 [24, 76, 15.5], [12, flat_bot(18), 18], [80, flat_bot(16), 16]],
@@ -437,7 +449,13 @@ order = (list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") +
           '\u00D8', '\u00C6', '\u0152', '\u00A3', '\u00A5', '\u00AB', '\u00BB', '\u2022', '\u00D7', '\u00AE',
           '\u2122', '\u00BF', '\u00A1'] + MARK_KEYS)
 G = {k: G[k] for k in order}
-data = {'H': H, 'W': W, 'glyphs': G}
+# Per-glyph melt factor (the tools multiply the Flow preset's melt by it).
+# Letters whose counters or slits are narrow by design clot in the heavy
+# states (mercury/molten/goo) at full melt; a lower factor keeps M's V and
+# slits, W's notches, the counters of # @ 8 B (>= ~0.15 O's) and Z's acute
+# corners open there, while liquid and bubble (low melt) barely change.
+TUNE = {'M': 0.7, 'W': 0.6, '#': 0.5, '@': 0.7, '8': 0.6, 'B': 0.7, 'Z': 0.7}
+data = {'H': H, 'W': W, 'glyphs': G, 'tune': {k: {'melt': f} for k, f in TUNE.items()}}
 json.dump(data, open('glyphs_meta.json', 'w'))
 # same data as a <script>-loadable global, for pages that skip bundle.py
 open('glyphs_meta.js', 'w').write('var GLYPH_DATA = ' + json.dumps(data) + ';\n')

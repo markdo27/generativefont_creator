@@ -32,10 +32,12 @@
   // every other Latin capital the mark skeletons can build (Ä Ç Č Ñ Ž …)
   var LATIN = GC.latinUpper(function (k) { return !!BASE[k]; });
   var ALNUM = /^[A-Z0-9]$/;
+  // letters drawn as their own skeletons beyond A–Z (Æ Ø Œ) join the caps
+  var OWN_CAPS = LETTERS.filter(function (k) { return !ALNUM.test(k) && /^\p{Lu}$/u.test(k); });
   var SETS = [
-    ['Uppercase', Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ')],
+    ['Uppercase', Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').concat(OWN_CAPS)],
     ['Numerals', Array.from('0123456789')],
-    ['Punctuation', LETTERS.filter(function (k) { return !ALNUM.test(k); })],
+    ['Punctuation', LETTERS.filter(function (k) { return !ALNUM.test(k) && OWN_CAPS.indexOf(k) < 0; })],
     ['Vietnamese', VIET],
     ['Latin', LATIN],
     ['Marks', MARK_KEYS],
