@@ -6,7 +6,7 @@
   --muted: #9a9a9a;
   --line: #363636;
   --line-soft: #222222;
-  --edge: #5c5c5c;             /* borders of interactive controls: >= 3:1 on the panels */
+  --edge: #646464;             /* borders of interactive controls: >= 3:1 on the panels */
   --accent: #ff5000;
   --control: #ededed;          /* slider thumbs, active toggles: accent is kept for selection + the main action */
   --fs-xs: 10px;
@@ -123,7 +123,13 @@ html, body {
 .pair-spacer { font-size: var(--fs-xs); line-height: 1; }
 .pair-preview { height: 46px; margin-top: -6px; color: var(--fg); display: flex; align-items: flex-end; justify-content: center; }
 .pair-preview svg { display: block; overflow: visible; }
-.pair-preview .manual { color: var(--accent); }
+.pair-preview.manual { color: var(--accent); }
+#pairKern.manual { border-color: var(--accent); }
+.skip-link {
+  position: absolute; left: 8px; top: -60px; z-index: 200; padding: 8px 12px;
+  background: var(--accent); color: #000; font-family: var(--mono); font-size: var(--fs-s); font-weight: 600;
+}
+.skip-link:focus { top: 8px; }
 .node-field label {
   font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--muted);
@@ -220,6 +226,11 @@ html, body {
   padding: 12px; resize: vertical; min-height: 90px; outline: none;
 }
 .tester.paper .tester-edit { background: #f4f4f4; color: #000; }
+.tester.paper input[type="range"]::-webkit-slider-runnable-track { background: #9a9a9a; }
+.tester.paper input[type="range"]::-moz-range-track { background: #9a9a9a; }
+.tester.paper input[type="range"]::-webkit-slider-thumb { background: #111; }
+.tester.paper input[type="range"]::-moz-range-thumb { background: #111; }
+.tester.paper .mini-btn { border-color: #8a8a8a; color: #333; }
 
 .add-block-row { padding: 22px 26px 40px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .proof-select { font-family: var(--mono); font-size: var(--fs-xs); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; min-width: 0; padding: 5px 8px; color: var(--muted); }
@@ -397,9 +408,11 @@ select {
 @media (max-width: 1180px) {
   .control-bar { flex-wrap: nowrap; overflow-x: auto; }
   /* the exports stay pinned in view while the rest of the bar scrolls */
+  .control-bar { scroll-padding-right: 300px; }
   .export-group {
     position: sticky; right: -18px; margin-right: -18px; padding: 0 18px 0 14px;
-    background: var(--surface); box-shadow: -14px 0 14px -6px var(--surface);
+    align-self: stretch; align-items: flex-end;
+    background: var(--surface); box-shadow: -14px 0 14px -6px var(--surface); z-index: 2;
   }
   .topbar { overflow-x: auto; }
   .save-state { max-width: 130px; }
@@ -410,7 +423,8 @@ select {
   #app { height: auto; min-height: 100vh; width: 100%; }
   .topbar { gap: 10px; padding: 0 12px; }
   .topbar-meta, .swatch-row, .topbar-divider { display: none; }
-  .fontname-input { width: 96px; min-width: 0; }
+  .fontname-input { width: 110px; min-width: 96px; flex-shrink: 0; }
+  .project-group { flex-shrink: 0; }
   .workspace { flex-direction: column; overflow: visible; }
   .editor-panel { width: 100%; min-width: 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .editor-canvas-wrap { width: 100%; max-width: 360px; margin: 0 auto; }

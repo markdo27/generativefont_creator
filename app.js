@@ -450,6 +450,11 @@
   }
 
   // --------------------------------------------------------- tester blocks
+  var resizeT = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(repaintAllTesters, 160);   // long words re-fit the column
+  });
   function renderTesters() {
     testerList.innerHTML = '';
     state.blocks.forEach(function (b) { testerList.appendChild(buildTester(b)); });
@@ -594,7 +599,7 @@
   // On a narrow screen a 200px word can be wider than the block; shrink the
   // rendering (not the setting) so the longest word still fits.
   function fitSize(b, body) {
-    var avail = body.clientWidth - 2;
+    var avail = (body.clientWidth || testerList.clientWidth - 52) - 2;
     if (!(avail > 0)) return b.size;
     var widest = 0;
     b.text.split(/\s+/).forEach(function (w) {
@@ -682,6 +687,7 @@
         var info = isMark(L) && GC.MARKS[L];
         cell.title = info ? info.name + ' (' + info.vi + ') — shared by every letter that uses it' : L;
         cell.setAttribute('aria-label', info ? 'Mark: ' + info.name : 'Glyph ' + L);
+        cell.tabIndex = L === state.selected ? 0 : -1;
         cell.addEventListener('click', function () { selectLetter(L); });
         row.appendChild(cell);
       });
@@ -690,6 +696,29 @@
     });
     refreshGlyphSet();
   }
+  // The character set is one Tab stop: arrows move between cells (up/down
+  // to the nearest cell on the next row), Enter/Space opens it, Home/End jump.
+  glyphSetEl.addEventListener('keydown', function (e) {
+    var cells = Array.prototype.slice.call(glyphSetEl.querySelectorAll('.glyph-cell'));
+    var i = cells.indexOf(document.activeElement), j = -1;
+    if (i < 0) return;
+    if (e.key === 'ArrowRight') j = Math.min(cells.length - 1, i + 1);
+    else if (e.key === 'ArrowLeft') j = Math.max(0, i - 1);
+    else if (e.key === 'Home') j = 0;
+    else if (e.key === 'End') j = cells.length - 1;
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      var r = cells[i].getBoundingClientRect(), best = Infinity, dir = e.key === 'ArrowDown' ? 1 : -1;
+      cells.forEach(function (c, k) {
+        var q = c.getBoundingClientRect(), dy = (q.top - r.top) * dir;
+        if (dy <= 4) return;
+        var score = dy * 4 + Math.abs(q.left - r.left);
+        if (score < best) { best = score; j = k; }
+      });
+    }
+    if (j < 0 || j === i) return;
+    e.preventDefault(); e.stopPropagation();
+    cells[i].tabIndex = -1; cells[j].tabIndex = 0; cells[j].focus();
+  });
   function refreshGlyphSet() {
     var color = state.ink === '#000000' ? '#fff' : state.ink;
     glyphSetEl.querySelectorAll('.glyph-cell').forEach(function (cell) {
@@ -769,11 +798,12 @@
     // metric guides: measured baseline and cap height, the accent line the
     // marks hang from, and the advance box the spacing gives this glyph
     var gl = vx, gr = vx + span, fs = 5.2 / z;
+    var labels = [];   // drawn after everything else, so glyphs never cover them
     function guide(y, label, color) {
       edSvg.appendChild(mkEl('line', { x1: gl, y1: y, x2: gr, y2: y, stroke: color, 'stroke-width': 1 / z, 'stroke-dasharray': (3 / z) + ' ' + (2 / z) }));
       var t = mkEl('text', { x: gl + 3 / z, y: y - 2 / z, fill: '#8a8a8a', 'font-size': fs, 'font-family': 'IBM Plex Mono, monospace' });
       t.textContent = label;
-      edSvg.appendChild(t);
+      labels.push(t);
     }
     guide(MET.base, 'baseline', '#4d4d4d');
     guide(MET.cap, 'cap', '#4d4d4d');
@@ -809,6 +839,8 @@
         }));
       });
     });
+
+    labels.forEach(function (t) { edSvg.appendChild(t); });
 
     nodes.forEach(function (n, i) {
       var act = i === state.activeNode;
@@ -1032,6 +1064,7 @@
       var on = c.dataset.letter === L;
       c.classList.toggle('selected', on);
       c.setAttribute('aria-pressed', String(on));
+      if (!glyphSetEl.contains(document.activeElement)) c.tabIndex = on ? 0 : -1;
     });
   }
   function stepLetter(d) {
@@ -1140,6 +1173,7 @@
   function updateMetricFields() {
     var L = state.selected, ok = canDraw(L);
     lsbEl.disabled = rsbEl.disabled = !ok;
+    $('btnAutoMetrics').disabled = !ok || !state.metrics[L];
     if (!ok) { lsbEl.value = ''; rsbEl.value = ''; return; }
     var s = spacingOf(L);
     if (document.activeElement !== lsbEl) lsbEl.value = s.lsb.toFixed(1);
@@ -1220,7 +1254,10 @@
     return true;
   }
   document.addEventListener('keydown', function (e) {
-    var t = e.target, typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    // only text-like fields keep their own keys; a slider, select or button
+    // that still has focus must not swallow Ctrl/⌘Z
+    var t = e.target, typing = t && (t.tagName === 'TEXTAREA' || t.isContentEditable ||
+      (t.tagName === 'INPUT' && /^(text|number|search|email|url|tel|password)$/.test(t.type)));
     var mod = e.metaKey || e.ctrlKey, k = e.key;
     if (mod && (k === 'z' || k === 'Z')) {
       if (typing) return;   // native undo inside text fields
@@ -1257,6 +1294,9 @@
     readout.textContent = 'node ' + (state.activeNode + 1) + ' of ' + EDV.nodes.length + describeNode(EDV.nodes[state.activeNode])
       + ' — arrows move it (shift ×10), alt+arrows resize';
   }
+  edWrap.addEventListener('focusout', function () {
+    if (state.activeNode < 0) readout.textContent = 'Click a node, then drag to move it, or drag its orange rim to swell / pinch the stroke.';
+  });
   edWrap.addEventListener('keydown', function (e) {
     var n = EDV.nodes.length, i = state.activeNode;
     if ((e.key === 'Enter' || e.key === ' ') && n && i < 0) {
@@ -1268,6 +1308,16 @@
     e.preventDefault();
     state.activeNode = next;
     renderEditor(); announceNode();
+  });
+
+  // On narrow bars the exports are pinned to the right edge; scroll the bar
+  // so a focused control never sits underneath them.
+  var bar = document.querySelector('.control-bar'), exportsEl = document.querySelector('.export-group');
+  bar.addEventListener('focusin', function (e) {
+    if (exportsEl.contains(e.target) || bar.scrollWidth <= bar.clientWidth) return;
+    var r = e.target.getBoundingClientRect(), ex = exportsEl.getBoundingClientRect(), br = bar.getBoundingClientRect();
+    if (r.right > ex.left - 8) bar.scrollLeft += r.right - ex.left + 16;
+    else if (r.left < br.left + 8) bar.scrollLeft -= br.left - r.left + 16;
   });
 
   // ---------------------------------------------------------------- controls
@@ -1575,7 +1625,10 @@
     rd.onload = function () {
       var p;
       try { p = JSON.parse(rd.result); parseProject(p); }       // validate before touching anything
-      catch (err) { toast('Could not open: ' + err.message, 3500); return; }
+      catch (err) {
+        toast('Could not open ' + f.name + (err instanceof SyntaxError ? ': not a readable project file' : ': ' + err.message), 3500);
+        return;
+      }
       applyProject(p); rebuildAll(); autosave(); toast('Opened ' + f.name);
     };
     rd.readAsText(f);
