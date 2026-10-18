@@ -250,6 +250,12 @@ button.pill-btn { margin: 0; line-height: normal; -webkit-appearance: none; appe
   letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
 }
 .stage-spacer { flex: 1; }
+/* the size readout gives way first when the bar runs out of room */
+.stage-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.history-cluster, .zoom-cluster { flex: 0 0 auto; }
+@media (max-width: 1100px) {
+  .hist-label { display: none; }   /* icons only; the buttons keep aria-label */
+}
 .history-cluster { display: flex; align-items: center; gap: 6px; padding-right: 14px; border-right: 1px solid var(--line); }
 .hist-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: var(--fg); }
 .hist-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }

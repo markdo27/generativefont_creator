@@ -308,35 +308,37 @@ G['~'] = [[[10, 59, 12], [22, 45, 13], [38, 44, 12.5], [54, 58, 12.5], [70, 57, 
 # O slash: the O with its stroke as a hard-unioned group, so the crossings
 # stay crisp and the two half-counters can't fill in where it meets the ring.
 _os = (63 * 0.565, 63 * 0.825)          # along the diagonal, ~12u past the O's ink
-G['Ø'] = [sloop(46, OCY, 33, ORY, 16.5, 15),
+G['\u00D8'] = [sloop(46, OCY, 33, ORY, 16.5, 15),
                detached([[R(46 - _os[0]), R(50.5 + _os[1]), 11], [R(46 + _os[0]), R(50.5 - _os[1]), 11]])]
-# AE: A's left leg, E's stem and arms, ~1.35 caps wide. The leg meets the top
-# arm well left of the stem (a flat apex like A's split one) and the A bar
-# sits low, so the narrow counter between leg and stem survives molten.
-G['Æ'] = [[[2, 94, 20], [20, 50, 11], [38, flat_top(16), 16], [62, 6, 18], [104, 8, 15]],
-               [[62, 6, 18], [61, 50, 14.5], [62, 94, 20], [107, flat_bot(15.5), 15.5]],
-               [[63, 50, 13], [99, 50, 13]],
-               [[14, 72, 10.5], [62, 72, 10.5]]]
+# AE: A's left leg, E's stem and arms, ~1.4 caps wide. The leg meets the top
+# arm well left of the stem (a flat apex like A's split one) and one bar runs
+# through both halves a little below centre, so the counter between leg and
+# stem is a trapezoid, not a sliver, and survives molten.
+G['\u00C6'] = [[[0, 94, 20], [17, 50, 10.5], [34, flat_top(15), 15], [66, 6, 17.5], [101, 8, 15]],
+               [[66, 6, 17.5], [65, 50, 13.5], [66, 94, 20], [103, flat_bot(15.5), 15.5]],
+               [[12, 62, 10.5], [65, 62, 12], [95, 62, 13]]]
 # OE: a half O closed by the E's stem; one counter.
-_oe = sell(42, OCY, 34, ORY, [-90, -135, -180, -225, -270], 16.5, 15, 2.3)
-G['Œ'] = [[[106, 8, 15], [62, 6, 18]] + _oe + [[62, 94, 20], [108, flat_bot(15.5), 15.5]],
-               [[62, 6, 18], [61, 50, 14.5], [62, 94, 20]],
-               [[63, 50, 13], [100, 50, 13]]]
+_oe = sell(42, OCY, 36, ORY, [-90, -135, -180, -225, -270], 16.5, 15, 2.3)
+G['\u0152'] = [[[104, 8, 15], [66, 6, 18]] + _oe + [[66, 94, 20], [106, flat_bot(15.5), 15.5]],
+               [[66, 6, 18], [65, 50, 14], [66, 94, 20]],
+               [[67, 50, 13], [100, 50, 13]]]
 # pound: hooked top, the stem bends into the baseline bar, a bar across it
-G['£'] = [[[78, 24, 14], [70, 7, 13.5], [53, top_y(13.5), 13.5], [36, 6, 14], [27, 24, 14.5], [26, 50, 15],
+G['\u00A3'] = [[[78, 24, 14], [70, 7, 13.5], [53, top_y(13.5), 13.5], [36, 6, 14], [27, 24, 14.5], [26, 50, 15],
                 [24, 76, 15.5], [12, flat_bot(18), 18], [80, flat_bot(16), 16]],
                [[4, 54, 12.5], [56, 54, 12.5]]]
 # yen: a Y with a higher fork and two bars across the stem, each its own group
-G['¥'] = [[[13, flat_top(17), 17], [46, 42, 13.5], [79, flat_top(17), 17]],
-               [[46, 42, 14], [46, 94, 19]],
-               detached([[20, 56, 9.5], [72, 56, 9.5]]),
-               detached([[20, 76, 9.5], [72, 76, 9.5]])]
-# guillemets: two small chevrons each, never melted together
-_gq = [[42, 30, 10.5], [16, 53, 12], [42, 76, 10.5]]
-G['«'] = [_gq, detached([[n[0] + 32] + n[1:] for n in _gq])]
-G['»'] = mirror(G['«'])
-G['•'] = [[[46, 52, 20]]]                                    # bullet: a fat period, raised
-G['×'] = [[[26, 32, 13.5], [66, 72, 13.5]], [[66, 32, 13.5], [26, 72, 13.5]]]   # multiply: + turned
+G['\u00A5'] = [[[13, flat_top(17), 17], [46, 40, 13.5], [79, flat_top(17), 17]],
+               [[46, 40, 14], [46, 94, 18]],
+               detached([[21, 55, 8.5], [71, 55, 8.5]]),
+               detached([[21, 77, 8.5], [71, 77, 8.5]])]
+# guillemets: two small chevrons each, never melted together; steep arms keep
+# the band between them open in bubble
+_gq = [[38, 29, 10], [16, 53, 11.5], [38, 77, 10]]
+G['\u00AB'] = [_gq, detached([[n[0] + 36] + n[1:] for n in _gq])]
+G['\u00BB'] = mirror(G['\u00AB'])
+G['\u2022'] = [[[46, 52, 22]]]                                    # bullet: a fat period, raised
+# multiply: two crossing bars, hard-unioned so so small a cross doesn't web up
+G['\u00D7'] = [[[26, 32, 13.5], [66, 72, 13.5]], detached([[66, 32, 13.5], [26, 72, 13.5]])]
 
 
 def shrink(chains, k, kr, cx=46, cy=50.5, dx=0, dy=0):
@@ -346,18 +348,21 @@ def shrink(chains, k, kr, cx=46, cy=50.5, dx=0, dy=0):
             for c in chains]
 
 
-# registered: the R at 44% inside a thin squarish ring, own group (as in ©)
-G['®'] = [sloop(46, 50, 44, 51, 10, 10, 2.5, 12),
-               detached(shrink(G['R'], 0.44, 0.55, 47, 50)[0])] + shrink(G['R'], 0.44, 0.55, 47, 50)[1:]
+# registered: a small R inside a squarish ring (like ©'s, squared off to give
+# the R's corners room). The R's bowl is a closed squarish loop in a group of
+# its own, so no melt reaches so small a counter; stem and leg hang off it.
+G['\u00AE'] = [sloop(46, 50, 44, 51, 10, 10, 2.8, 12),
+               detached(sloop(46, 37.5, 15, 14, 8.5, 8.5, 3.0, 8)),
+               detached([[31, 51.5, 8.5], [31, 76, 9.5]]), [[47, 51.5, 8.5], [61, 76, 9.5]]]
 # trade mark: a small T and M on the cap line, each its own group
 _tmt = flat_top(9.5)
-G['™'] = [[[-4, _tmt, 9.5], [34, _tmt, 9.5]], [[15, _tmt, 9.5], [15, 38, 10]],
-               detached([[46, 38, 10], [46, 20, 8.5], [46, _tmt, 9.5], [64, 30, 8.5], [82, _tmt, 9.5],
-                         [82, 20, 8.5], [82, 38, 10]])]
+G['\u2122'] = [[[-4, _tmt, 9.5], [26, _tmt, 9.5]], [[11, _tmt, 9.5], [11, 38, 10]],
+               detached([[50, 38, 9.5], [50, 21, 8.5], [50, _tmt, 9.5], [71, 34, 8], [92, _tmt, 9.5],
+                         [92, 21, 8.5], [92, 38, 9.5]])]
 # inverted ? and !: turned 180 degrees and dropped 20u, so the dot sits near
 # cap height and the curl hangs below the baseline
-G['¿'] = rot180(G['?'], cy=60.5)
-G['¡'] = rot180(G['!'], cy=60.5)
+G['\u00BF'] = rot180(G['?'], cy=60.5)
+G['\u00A1'] = rot180(G['!'], cy=60.5)
 
 # --- diacritic marks -------------------------------------------------------
 # Same [x, y, r] chains, but in mark space: (0, 0) is the anchor. glyph-compose.js
@@ -387,18 +392,18 @@ M['\u0335'] = [[[-28, 0, 12, 1], [6, 0, 11.5]]]          # Đ bar, fused: hard u
 # Beyond Vietnamese. The dots are one size for the dot above and the
 # diaeresis (a little under the ! dot); the diaeresis pair is spaced to sit
 # inside the stems of H/U and is two groups, so the dots never bridge.
-M['̈'] = [[[-15, 0, 11]], detached([[15, 0, 11]])]                        # diaeresis
-M['̇'] = [[[0, 0, 11.5]]]                                                 # dot above
-M['̊'] = [loop(0, 0, 13, 12, 8, 7.5, 8)]            # ring above: one smooth closed piece, so the
+M['\u0308'] = [[[-15, 0, 11]], detached([[15, 0, 11]])]                        # diaeresis
+M['\u0307'] = [[[0, 0, 11.5]]]                                                 # dot above
+M['\u030A'] = [loop(0, 0, 14, 13, 7.5, 7, 8)]            # ring above: one smooth closed piece, so the
                                                       # melt can't fill it; the hole is ring - stroke
-M['̌'] = [[[-17, -11, 9.5], [0, 3, 10.5], [17, -11, 9.5]]]                # caron = circumflex turned
-M['̄'] = [[[-14, 0, 10], [14, 0, 10]]]                                    # macron
+M['\u030C'] = [[[-17, -11, 9.5], [0, 3, 10.5], [17, -11, 9.5]]]                # caron = circumflex turned
+M['\u0304'] = [[[-14, 0, 10], [14, 0, 10]]]                                    # macron
 # cedilla and ogonek hang off the foot: compose() puts their ink top 3u into
 # the base's bottom, the cedilla centred, the ogonek at the right foot. The
 # first node is the attach stub; the hook stays open so it never blobs.
-M['̧'] = [[[0, -1, 9.5], [1, 7, 8.5], [5, 10.5, 8], [11, 14, 8], [12.5, 20, 8], [9, 26, 8],
-                [1, 29, 8], [-7, 27.5, 8.5]]]                                  # cedilla
-M['̨'] = [[[0, -1, 9.5], [-4, 8, 9], [-6, 16, 8.5], [-3, 23, 8], [5, 26, 7.5], [13, 24, 7]]]  # ogonek
+M['\u0327'] = [[[0, -1, 9.5], [1, 6, 8.5], [5, 9, 8], [10.5, 12.5, 8], [12, 18, 8], [8.5, 23.5, 8],
+                [1, 26, 8], [-7, 24.5, 8.5]]]                                  # cedilla
+M['\u0328'] = [[[0, -1, 9.5], [-4, 8, 9], [-6, 16, 8.5], [-3, 23, 8], [5, 26, 7.5], [13, 24, 7]]]  # ogonek
 MARK_KEYS = list(M.keys())
 G.update(M)
 
@@ -435,8 +440,8 @@ order = (list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") +
           '\u2013', '\u2014', '\u2018', '\u2019', '\u201C', '\u201D',
           '$', '\u20AB', '\u20AC', '\u00A9', '\u2026', '\u00B0', '[', ']', '{', '}', '<', '>', '|', '\\',
           '^', '_', '`', '~',
-          'Ø', 'Æ', 'Œ', '£', '¥', '«', '»', '•', '×', '®',
-          '™', '¿', '¡'] + MARK_KEYS)
+          '\u00D8', '\u00C6', '\u0152', '\u00A3', '\u00A5', '\u00AB', '\u00BB', '\u2022', '\u00D7', '\u00AE',
+          '\u2122', '\u00BF', '\u00A1'] + MARK_KEYS)
 G = {k: G[k] for k in order}
 data = {'H': H, 'W': W, 'glyphs': G}
 json.dump(data, open('glyphs_meta.json', 'w'))

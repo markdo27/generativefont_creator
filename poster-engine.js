@@ -336,7 +336,7 @@
     var keys = [k, Array.from(k)[0]];
     for (var i = 0; i < keys.length; i++) {
       var t = hasOwn(TUNE, keys[i]) && TUNE[keys[i]];
-      if (t && finite(t.melt) && t.melt >= 0) return t.melt;
+      if (t && finite(t.melt) && t.melt > 0) return t.melt;
     }
     return 1;
   }
