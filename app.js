@@ -114,13 +114,21 @@
   var own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
   function hasKey(k) { return own(FLAT, k); }
 
+  // Per-glyph shape tuning from the glyph data (tune: {M: {melt: 0.6}}):
+  // letters with narrow counters (M W # @ 8) take less melt, so the heavy
+  // flow states don't clot them while every other letter keeps the full pour.
+  var TUNE = GLYPH_DATA.tune || {};
+  function meltFor(key) {
+    var t = Object.prototype.hasOwnProperty.call(TUNE, key) && TUNE[key];
+    return state.melt * (t && t.melt > 0 ? t.melt : 1);
+  }
   function traceChains(chains, key, tag) {
     var k = 't|' + key + '|' + tag;
     if (cache[k]) return cache[k];
     var r;
     try {
       r = BlobEngine.glyphRings(GC.markChains(key, chains), GC.traceOpts(key, {
-        mass: state.mass, melt: state.melt, tension: state.tension, wobble: state.wobble,
+        mass: state.mass, melt: meltFor(key), tension: state.tension, wobble: state.wobble,
         grain: state.grain, smooth: state.smooth, simplify: 0.3,
         // while a slider is being dragged, trace coarser and refine on release
         res: state.draft ? state.res * 1.7 : state.res,
