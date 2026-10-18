@@ -67,21 +67,20 @@
     return 400;
   }
 
-  // Palette derived from the tool's black / white / orange identity, plus a
-  // cool complement of the orange so posters can go two-tone without leaving
-  // the family.
+  // Palette in the tool's own black and white: a neutral grey ramp and a
+  // paper ramp (newsprint whites, warm blacks). Any other colour is one
+  // custom pick away.
   var RAMPS = [
-    ['#000000', '#141414', '#2b2b2b', '#4d4d4d', '#7a7a7a', '#a8a8a8', '#d4cfc5', '#f5f2ec', '#ffffff'],
-    ['#1f0800', '#3d1100', '#661d00', '#8f2900', '#c23a00', '#ff5000', '#ff7a3d', '#ffa679', '#ffd2b8'],
-    ['#001018', '#002233', '#003d5c', '#005c8a', '#0084c2', '#00a8f0', '#4cc3f7', '#94dbfb', '#d1eefd'],
+    ['#000000', '#141414', '#2b2b2b', '#4d4d4d', '#7a7a7a', '#a8a8a8', '#d4d4d4', '#ededed', '#ffffff'],
+    ['#0d0c0a', '#1c1a17', '#34312c', '#56524b', '#848077', '#b2ada3', '#d4cfc5', '#f5f2ec', '#fbfaf6'],
   ];
   var PAIRS = [
     { name: 'Paper', bg: '#f5f2ec', ink: '#141414' },
     { name: 'Noir', bg: '#000000', ink: '#ffffff' },
-    { name: 'Blaze', bg: '#f5f2ec', ink: '#ff5000' },
-    { name: 'Ember', bg: '#000000', ink: '#ff5000' },
-    { name: 'Sand', bg: '#ffd2b8', ink: '#8f2900' },
-    { name: 'Deep', bg: '#002233', ink: '#00a8f0' },
+    { name: 'Print', bg: '#ffffff', ink: '#000000' },
+    { name: 'Graphite', bg: '#2b2b2b', ink: '#ededed' },
+    { name: 'Ash', bg: '#a8a8a8', ink: '#000000' },
+    { name: 'Smoke', bg: '#141414', ink: '#7a7a7a' },
   ];
 
   var TITLE_STYLE_HINTS = {
@@ -1788,42 +1787,51 @@
     ctx.clearRect(0, 0, W, H);
     if (!state.selected) return;
     var lw = 1.5 / z;
-    ctx.strokeStyle = '#ff5000';
-    ctx.fillStyle = '#ff5000';
-    ctx.lineWidth = lw;
+    // Black and white, so it reads on any poster colour: white over a black
+    // line (dashed for the box), white handles with a black edge.
+    function bw(path, dashed) {
+      ctx.setLineDash([]); ctx.strokeStyle = '#000'; ctx.lineWidth = lw * 2.2;
+      path(); ctx.stroke();
+      ctx.setLineDash(dashed ? [6 / z, 4 / z] : []); ctx.strokeStyle = '#fff'; ctx.lineWidth = lw;
+      path(); ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     if (state.selected.type === 'row') {
       var rl = buildRowLayouts().filter(function (r) { return r.row.id === state.selected.id; })[0];
       if (!rl) return;
       var g = rowGizmo(rl);
-      ctx.setLineDash([6 / z, 4 / z]);
-      ctx.beginPath();
-      ctx.moveTo(g.corners[0][0], g.corners[0][1]);
-      for (var i = 1; i < 4; i++) ctx.lineTo(g.corners[i][0], g.corners[i][1]);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
+      bw(function () {
+        ctx.beginPath();
+        ctx.moveTo(g.corners[0][0], g.corners[0][1]);
+        for (var i = 1; i < 4; i++) ctx.lineTo(g.corners[i][0], g.corners[i][1]);
+        ctx.closePath();
+      }, true);
       // rotation arm
-      ctx.beginPath();
-      ctx.moveTo(g.rotateAnchor[0], g.rotateAnchor[1]);
-      ctx.lineTo(g.rotate[0], g.rotate[1]);
-      ctx.stroke();
+      bw(function () {
+        ctx.beginPath();
+        ctx.moveTo(g.rotateAnchor[0], g.rotateAnchor[1]);
+        ctx.lineTo(g.rotate[0], g.rotate[1]);
+      }, false);
       var hs = HANDLE_R / z;
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = lw;
       g.corners.forEach(function (p) {
         ctx.fillRect(p[0] - hs, p[1] - hs, hs * 2, hs * 2);
+        ctx.strokeRect(p[0] - hs, p[1] - hs, hs * 2, hs * 2);
       });
       ctx.beginPath();
       ctx.arc(g.rotate[0], g.rotate[1], hs, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fill(); ctx.stroke();
       return;
     }
 
     var b = findBlock(state.selected.id);
     if (!b) return;
     var bbox = blockLayout(b).bbox, pad = 6 / z;
-    ctx.setLineDash([6 / z, 4 / z]);
-    ctx.strokeRect(bbox[0] - pad, bbox[1] - pad, bbox[2] - bbox[0] + pad * 2, bbox[3] - bbox[1] + pad * 2);
-    ctx.setLineDash([]);
+    bw(function () {
+      ctx.beginPath();
+      ctx.rect(bbox[0] - pad, bbox[1] - pad, bbox[2] - bbox[0] + pad * 2, bbox[3] - bbox[1] + pad * 2);
+    }, true);
   }
 
   // -------------------------------------------------------------- scheduler
@@ -2236,7 +2244,7 @@
       btn.addEventListener('click', function () {
         checkpoint(p.name + ' colour pair');
         // small text that followed the old ink follows the new one, so a dark
-        // pair (Noir, Ember, Deep) never leaves the caption invisible
+        // pair (Noir, Graphite, Smoke) never leaves the caption invisible
         var oldInk = String(state.ink).toLowerCase();
         state.smallBlocks.forEach(function (b) {
           if (String(b.color).toLowerCase() === oldInk || String(b.color).toLowerCase() === '#141414') b.color = p.ink;
@@ -3060,7 +3068,7 @@
     // The dropzone is a <label for=fontFileInput>: the browser opens the picker
     // on click, and the (visually hidden) input itself takes keyboard focus.
     var dropzone = $('fontDropzone'), fileInput = $('fontFileInput');
-    dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; });
+    dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.style.borderColor = 'var(--hi)'; });
     dropzone.addEventListener('dragleave', function () { if (!state.uploadedFont) dropzone.style.borderColor = ''; });
     dropzone.addEventListener('drop', function (e) {
       e.preventDefault(); dropzone.style.borderColor = '';
