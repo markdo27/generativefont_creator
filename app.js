@@ -221,7 +221,7 @@
       if (b[3] > bot) bot = b[3];
     }
     LETTERS.forEach(function (L) { take(ringsOf(L)); });
-    VIET.forEach(function (V) { var c = compositeOf(V); if (c) take(c.rings); });
+    VIET.concat(LATIN).forEach(function (V) { var c = compositeOf(V); if (c) take(c.rings); });   // cedilla/ogonek letters too
     ASC_EM = Math.max(1.02, (MET.base - top) / MET.em + 0.02);
     DESC_EM = Math.max(0.22, (bot - MET.base) / MET.em + 0.02);
   }
@@ -295,8 +295,9 @@
     if (!a || !b) return 0;
     var key = a + '\u0000' + b;
     if (own(state.kernOv, key)) return state.kernOv[key];   // a designer's own value wins
-    var bk = baseOf(a) + '\u0000' + baseOf(b);               // ...and reaches Á Ấ Ạ when set on A
-    if (bk !== key && own(state.kernOv, bk)) return state.kernOv[bk];
+    // ...and reaches Á Ấ Ạ when set on A: the most specific override wins
+    var ba = baseOf(a), bb2 = baseOf(b), tries = [a + '\u0000' + bb2, ba + '\u0000' + b, ba + '\u0000' + bb2];
+    for (var ti = 0; ti < tries.length; ti++) if (tries[ti] !== key && own(state.kernOv, tries[ti])) return state.kernOv[tries[ti]];
     if (!(state.kern > 0)) return 0;
     if (key in KERN) return KERN[key];
     if (KBASE == null) {
@@ -1794,7 +1795,9 @@
     setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
   }
   function safeName() {
-    return (state.fontName || 'font').trim().replace(/[^a-z0-9\-_]+/gi, '-').toLowerCase() || 'font';
+    // fold accents first, so "Chữ Đẹp" saves as chu-dep, not ch-p
+    var t = (state.fontName || 'font').trim().replace(/[\u0110\u0111]/g, 'd').normalize('NFD').replace(/\p{M}+/gu, '');
+    return t.replace(/[^a-z0-9\-_]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'font';
   }
   $('btnExportSvg').addEventListener('click', function () {
     dl(new Blob([buildSVG()], { type: 'image/svg+xml' }), safeName() + '-specimen.svg');
@@ -1910,7 +1913,7 @@
       glyphs.push(g);
     });
     LETTERS.forEach(function (L) {
-      if (!ALNUM.test(L)) return;
+      if (!ALNUM.test(L) && OWN_CAPS.indexOf(L) < 0) return;   // letters and figures (Æ Ø Œ too) carry anchors
       var sp = spacingOf(L), pb = GC.bbox(ringsOf(L));
       if (!pb) return;
       var cx = tx((pb[0] + pb[2]) / 2 + sp.lsb - sp.x0);
@@ -1945,6 +1948,13 @@
     var gpos = FontTables.gpos({ kern: pairs, marks: markSpec }), gdef = FontTables.gdef(gdefCls);
     var ext = { advMax: 0, minL: 0, minR: 0, xMaxExt: 0 }, yMaxAll = 0, yMinAll = 0;
     var fontAsc = Math.round(UPM * ASC_EM), fontDesc = -Math.round(UPM * DESC_EM);
+    // post: underline position / thickness (opentype.js leaves 0/0)
+    var post = FontTables.readTable(buf, 'post');
+    if (post && post.length >= 12) {
+      var pv = new DataView(post.buffer, post.byteOffset, post.byteLength);
+      pv.setInt16(8, -Math.round(UPM * 0.075)); pv.setInt16(10, Math.round(UPM * 0.05));
+      extra.post = post;
+    }
     // hmtx: opentype.js 1.3.4 ignores leftSideBearing, so write xMin per glyph
     var hmtx = FontTables.readTable(buf, 'hmtx'), hhea = FontTables.readTable(buf, 'hhea');
     if (hmtx && hhea) {

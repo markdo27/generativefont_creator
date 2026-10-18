@@ -52,7 +52,7 @@
   var RIGHT_FOOT = {}; RIGHT_FOOT[OGON] = 1;
 
   // letters NFD does not split
-  var EXTRA = { 'Đ': 'D' + BAR };
+  var EXTRA = { 'Đ': 'D' + BAR, '\u00D0': 'D' + BAR };   // Ð (Icelandic eth) shares Đ's form
 
   // Where fused marks attach, in base-glyph units. Anything not listed falls
   // back to a guess from the base's ink box (see fusedAnchor).
@@ -89,7 +89,7 @@
   function latinUpper(has) {
     var out = [], viet = {};
     vietnameseUpper().forEach(function (v) { viet[v] = 1; });
-    [[0xC0, 0x17F], [0x1E00, 0x1EFF]].forEach(function (r) {
+    [[0xC0, 0x24F], [0x1E00, 0x1EFF]].forEach(function (r) {
       for (var cp = r[0]; cp <= r[1]; cp++) {
         var c = String.fromCodePoint(cp);
         if (viet[c] || c.toUpperCase() !== c || c.toLowerCase() === c) continue;
