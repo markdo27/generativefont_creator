@@ -2209,6 +2209,13 @@
     state.selected = { type: type, id: id };
     syncSelection();
     paintOverlay();
+    // expanding one card collapses another, which can move the focused field
+    // out of view after the browser has already scrolled to it
+    requestAnimationFrame(function () {
+      var a = document.activeElement;
+      var side = document.querySelector('.poster-sidebar');
+      if (a && a.scrollIntoView && side && side.contains(a)) a.scrollIntoView({ block: 'nearest' });
+    });
     return true;
   }
 
@@ -2228,7 +2235,14 @@
       btn.appendChild(mk('div', 'pair-name', p.name));
       btn.addEventListener('click', function () {
         checkpoint(p.name + ' colour pair');
+        // small text that followed the old ink follows the new one, so a dark
+        // pair (Noir, Ember, Deep) never leaves the caption invisible
+        var oldInk = String(state.ink).toLowerCase();
+        state.smallBlocks.forEach(function (b) {
+          if (String(b.color).toLowerCase() === oldInk || String(b.color).toLowerCase() === '#141414') b.color = p.ink;
+        });
         state.ink = p.ink; state.bg = p.bg; state.bgTransparent = false;
+        renderSmallBlockCards();
         $('inkColor').value = p.ink; $('bgColor').value = p.bg;
         $('bgTransparent').checked = false;
         keepFocus(renderPalette); scheduleRender(false);
