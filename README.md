@@ -3,7 +3,9 @@
 A self-contained, browser-based generative font tool. Sculpt an amorphous,
 liquid/Y2K-style typeface using a metaball (signed-distance-field) glyph
 engine, preview it live in foundry-style specimen blocks, and export it as
-SVG, PNG, or a real installable OTF font file.
+SVG, PNG, or a real installable OTF font file — with full Vietnamese
+(all 67 accented capitals plus Đ), lowercase mapping, measured metrics and
+automatic kerning.
 
 ## Structure
 
@@ -13,13 +15,21 @@ SVG, PNG, or a real installable OTF font file.
   stitching, chain repair, Chaikin smoothing). Exposes `glyphRings` (the
   hand-authored capsule/node field used by the Font tool) and the generic
   `traceField` + `valueNoise` used by the Poster tool below.
+- `glyph-compose.js` — diacritic composition shared by both tools: splits text
+  into clusters (NFC/NFD, lowercase), decomposes accented letters into a base
+  glyph plus mark glyphs and places the marks (Vietnamese stacking rules).
+- `font-tables.js` — writes a GPOS `kern` table and splices tables into the
+  OTF that opentype.js produces (opentype.js cannot write kerning itself).
 - `body.html`, `styles.css` — markup and styling, inlined into `index.html`.
-- `glyphs_meta.json` / `gen_glyphs_meta.py` — the 42-glyph node data (A–Z,
-  0–9, punctuation) and the script that generated it.
+- `glyphs_meta.json` / `gen_glyphs_meta.py` — the glyph node data (A–Z,
+  0–9, punctuation, and the diacritic marks keyed by combining code point)
+  and the script that generates it (`python3 gen_glyphs_meta.py` rewrites both
+  `glyphs_meta.json` and `glyphs_meta.js`).
 - `glyphs_meta.js` — the same glyph data as a `<script>`-loadable global
   (`GLYPH_DATA`), for pages like `poster.html` that don't go through `bundle.py`.
 - `bundle.py` — assembles `index.html` from the source files above.
-- `jsdom_check.js` — headless DOM/interaction smoke test.
+- `jsdom_check.js` — headless DOM/interaction smoke test (`npm i jsdom`, then
+  `node jsdom_check.js` after `python3 bundle.py`).
 
 ### Poster tool
 
@@ -108,4 +118,64 @@ its nodes to reshape the letter (drag a node's orange rim to change stroke
 thickness at that point), or use the X/Y/R fields and Add/Delete Node
 controls for finer control. Toggle Global Edit to apply a change to every
 glyph sharing that node index, or Mirror to mirror edits across the
-vertical axis.
+vertical axis. The canvas shows the measured baseline, cap height, ascender,
+descender and the glyph's advance box; `Fit` / `+` / `−` or scrolling zoom it.
+
+Keyboard: Ctrl/⌘Z undo, Shift+Ctrl/⌘Z redo, Ctrl/⌘S save, `[` `]` previous /
+next glyph, Tab (canvas focused) cycles nodes, arrows nudge (Shift ×10),
+Alt+arrows swell/pinch, Delete removes a node, Esc deselects. `Keys` in the
+topbar lists them.
+
+## Vietnamese and diacritics
+
+Accented letters are composed, never drawn twice. Each mark — acute, grave,
+hook above, tilde, dot below, circumflex, breve, horn, and the Đ bar — is its
+own node-chain glyph (the *Marks* row of the character set). `glyph-compose.js`
+decomposes a letter like Ấ into A + circumflex + acute and places the marks
+from the rendered ink: they hang a fixed gap above the font's cap line (one
+shared accent line for every letter), stack upward, and follow Vietnamese
+conventions — acute/hook beside a circumflex on the right, grave on the left,
+a circumflex or breve that carries a tone squashed to 80 %, the dot below
+under the foot line. Floating marks are traced as separate fields, so the
+melt can never weld them to the letter; the horn (Ơ Ư) and Đ bar are fused
+and melt in like any stroke.
+
+Selecting a Vietnamese letter in the editor shows its base nodes (grey) and
+its mark nodes (brown): dragging a mark node edits that mark in every letter
+that uses it. *Mark size* and *Mark gap* in the editor panel tune all marks at
+once. Text is normalised, so precomposed (NFC) and decomposed (NFD) input,
+upper or lower case, all render; anything the font can't draw yet shows as an
+orange box and is listed in a toast instead of vanishing.
+
+## Spacing, metrics and kerning
+
+Metrics are measured from the ink, not the skeleton frame: baseline = the
+median foot of H I E L N…, cap height = their median top, and the em is set so
+caps are 70 % of it. Preview sizes, the OTF (UPM 1000, caps ≈ 700, ascender
+1020 for stacked marks, descender −250) and the line-height control all share
+that em, so `Leading` behaves like CSS line-height on a real font.
+
+Sidebearings are optical: each glyph is scanned into left/right ink profiles
+and loses sidebearing in proportion to the white its own shape already holds
+(an O or A gets less than an H). Kerning compares the closest ink across a pair
+with what the two sidebearings alone would give and takes back a share of the
+excess (the *Kerning* slider), so AV, LT, TA, P. tuck in while HH stays put.
+Per-glyph `Left SB` / `Right SB` fields override the automatic values (stored
+as offsets, so they survive later shape changes). Kerning is applied in the
+previews and the specimen exports, and written into the OTF as a GPOS table.
+
+## Projects
+
+Work autosaves to the browser (`localStorage`, key `liquidfont.project.v1`)
+and can be saved to / opened from a `.liquid.json` file with `Save` / `Open`.
+The saved project includes every skeleton with your edits applied, which the
+Poster tool reads so posters use your glyphs.
+
+## Export
+
+- **OTF** — every letter, numeral, punctuation mark and Vietnamese capital;
+  lowercase and Vietnamese lowercase code points map to the caps, NBSP to the
+  space, zero-width combining marks for decomposed text, a drawn `.notdef`,
+  AGL glyph names, measured vertical metrics, GPOS kerning.
+- **SVG / PNG** — the whole specimen (every preview block with its own size,
+  leading, tracking and ink/paper colours).
