@@ -2009,6 +2009,11 @@
     spacing: function (L) { var s = spacingOf(L); return { lsb: s.lsb, rsb: s.rsb, adv: s.adv, x0: s.x0, x1: s.x1 }; },
     metrics: function () { return { base: MET.base, cap: MET.cap, em: MET.em, ascender: ASC_EM, descender: DESC_EM }; },
     glyphs: function () { return LETTERS.concat(VIET, LATIN); },
+    rings: function (L) { return ringsOf(L); },
+    // counters: rings wound against the outer shells (see ringsFromField), with their areas
+    holes: function (L) {
+      return ringsOf(L).map(BlobEngine.signedArea).filter(function (a) { return a < 0; }).map(function (a) { return -a; });
+    },
     // true 2D distance between the inks of a set pair, glyph units (tests)
     pairGap: function (a, b) {
       var A = spacingOf(a), B = spacingOf(b), shift = A.adv + kernOf(a, b) - (B.x0 - B.lsb) + (A.x0 - A.lsb);
