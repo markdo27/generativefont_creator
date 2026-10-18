@@ -608,6 +608,32 @@
     return out.length >= 6 ? out : ring;
   }
 
+  // For curve output: fewer, longer segments. Points at horizontal and
+  // vertical extremes are always kept (fonts want nodes there, and hinting
+  // and rasterisers like them), Douglas-Peucker thins the rest between them;
+  // ringToCubics then puts a smooth curve back through what is left.
+  function simplifyForCurves(ring, tol) {
+    var n = ring.length, i;
+    if (n < 8) return ring;
+    var keep = new Array(n).fill(false), idx = [];
+    for (i = 0; i < n; i++) {
+      var a = ring[(i + n - 1) % n], p = ring[i], b = ring[(i + 1) % n];
+      if ((p[0] - a[0]) * (b[0] - p[0]) < 0 || (p[1] - a[1]) * (b[1] - p[1]) < 0) { keep[i] = true; idx.push(i); }
+    }
+    if (idx.length < 2) return decimateRing(ring, tol);
+    for (var k = 0; k < idx.length; k++) {
+      var f = idx[k], l = idx[(k + 1) % idx.length], seg = [];
+      for (var j = f; ; j = (j + 1) % n) { seg.push(ring[j]); if (j === l) break; }
+      var sk = new Array(seg.length).fill(false);
+      sk[0] = true; sk[seg.length - 1] = true;
+      dpChain(seg, 0, seg.length - 1, tol, sk);
+      for (var m = 1; m < seg.length - 1; m++) if (sk[m]) keep[(f + m) % n] = true;
+    }
+    var out = [];
+    for (i = 0; i < n; i++) if (keep[i]) out.push(ring[i]);
+    return out.length >= 4 ? out : ring;
+  }
+
   // ------------------------------------------------------------ orientation
   function signedArea(r) {
     var a = 0;
@@ -738,6 +764,7 @@
   return {
     PRESETS: PRESETS,
     ringToCubics: ringToCubics,
+    simplifyForCurves: simplifyForCurves,
     glyphRings: glyphRings,
     signedArea: signedArea,
     traceField: traceField,

@@ -22,9 +22,10 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var GRAVE = '̀', ACUTE = '́', CIRC = '̂', TILDE = '̃',
-      BREVE = '̆', HOOK = '̉', HORN = '̛', DOT = '̣',
-      BAR = '̵';
+  var GRAVE = '\u0300', ACUTE = '\u0301', CIRC = '\u0302', TILDE = '\u0303',
+      BREVE = '\u0306', HOOK = '\u0309', HORN = '\u031B', DOT = '\u0323',
+      BAR = '\u0335', DIAER = '\u0308', RING = '\u030A', CARON = '\u030C',
+      CEDIL = '\u0327', OGON = '\u0328', DOTA = '\u0307', MACRON = '\u0304';
 
   var MARKS = {};
   MARKS[ACUTE] = { zone: 'top', name: 'Acute', vi: 'sắc' };
@@ -36,7 +37,19 @@
   MARKS[BREVE] = { zone: 'top', name: 'Breve', vi: 'trăng' };
   MARKS[HORN]  = { zone: 'fused', name: 'Horn', vi: 'móc' };
   MARKS[BAR]   = { zone: 'fused', name: 'Stroke', vi: 'gạch' };
-  var MARK_ORDER = [ACUTE, GRAVE, HOOK, TILDE, DOT, CIRC, BREVE, HORN, BAR];
+  // beyond Vietnamese: the marks that unlock most other Latin capitals
+  MARKS[DIAER] = { zone: 'top', name: 'Diaeresis', vi: 'hai chấm' };
+  MARKS[RING]  = { zone: 'top', name: 'Ring above', vi: 'khuyên' };
+  MARKS[CARON] = { zone: 'top', name: 'Caron', vi: 'mũ ngược' };
+  MARKS[DOTA]  = { zone: 'top', name: 'Dot above', vi: 'chấm trên' };
+  MARKS[MACRON] = { zone: 'top', name: 'Macron', vi: 'gạch trên' };
+  MARKS[CEDIL] = { zone: 'bottom', name: 'Cedilla', vi: 'móc dưới' };
+  MARKS[OGON]  = { zone: 'bottom', name: 'Ogonek', vi: 'đuôi' };
+  var MARK_ORDER = [ACUTE, GRAVE, HOOK, TILDE, DOT, CIRC, BREVE, HORN, BAR, DIAER, RING, CARON, DOTA, MACRON, CEDIL, OGON];
+  // cedilla and ogonek hang right off the foot instead of a gap below it,
+  // and the ogonek sits at the right foot rather than the centre
+  var TIGHT_BOTTOM = {}; TIGHT_BOTTOM[CEDIL] = 1; TIGHT_BOTTOM[OGON] = 1;
+  var RIGHT_FOOT = {}; RIGHT_FOOT[OGON] = 1;
 
   // letters NFD does not split
   var EXTRA = { 'Đ': 'D' + BAR };
@@ -69,6 +82,23 @@
 
   var VIET_BASES = ['A', 'Ă', 'Â', 'E', 'Ê', 'I', 'O', 'Ô', 'Ơ', 'U', 'Ư', 'Y'];
   var TONES = ['', ACUTE, GRAVE, HOOK, TILDE, DOT];
+
+  // Every precomposed Latin capital (Latin-1, Extended-A, Extended
+  // Additional) whose decomposition this set of marks can build, minus the
+  // Vietnamese ones — computed, so adding a mark skeleton adds its letters.
+  function latinUpper(has) {
+    var out = [], viet = {};
+    vietnameseUpper().forEach(function (v) { viet[v] = 1; });
+    [[0xC0, 0x17F], [0x1E00, 0x1EFF]].forEach(function (r) {
+      for (var cp = r[0]; cp <= r[1]; cp++) {
+        var c = String.fromCodePoint(cp);
+        if (viet[c] || c.toUpperCase() !== c || c.toLowerCase() === c) continue;
+        var p = plan(c, has);
+        if (p && !p.simple) out.push(c);
+      }
+    });
+    return out;
+  }
 
   // All 67 uppercase Vietnamese letters outside ASCII, grouped by vowel.
   function vietnameseUpper() {
@@ -205,7 +235,15 @@
     function pts(R) { var o = []; R.forEach(function (r) { r.forEach(function (q) { if (inBox(q)) o.push(q); }); }); return o; }
     function edges(R) {
       var o = [];
-      R.forEach(function (r) { for (var k = 0; k < r.length; k++) { var a = r[k], b = r[(k + 1) % r.length]; if (inBox(a) || inBox(b)) o.push([a, b]); } });
+      // an edge counts if its own box crosses the overlap box — a long flat
+      // edge (the foot of an E) can pass under a mark with both ends outside
+      R.forEach(function (r) {
+        for (var k = 0; k < r.length; k++) {
+          var a = r[k], b = r[(k + 1) % r.length];
+          if (Math.max(a[0], b[0]) >= bx[0] && Math.min(a[0], b[0]) <= bx[2] &&
+              Math.max(a[1], b[1]) >= bx[1] && Math.min(a[1], b[1]) <= bx[3]) o.push([a, b]);
+        }
+      });
       return o;
     }
     var best = Infinity;
@@ -300,9 +338,13 @@
     p.bottom.forEach(function (m) {
       var mr = api.rings(m), mb = bbox(mr);
       if (!mb) return;
-      var st = settle(mr, ax, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
+      var bx2 = RIGHT_FOOT[m] ? pb[2] - (mb[2] - mb[0]) * 0.6 : ax, st;
+      if (TIGHT_BOTTOM[m]) {   // overlaps the foot slightly, so it reads attached
+        var oy0 = bb[3] - LAYOUT.clear - mb[1];
+        st = { oy: oy0, placed: shift(mr, bx2, oy0) };
+      } else st = settle(mr, bx2, bottom + LAYOUT.gapBottom - mb[1], 1, [baseRings]);
       out = out.concat(st.placed);
-      parts.push({ key: m, ox: ax, oy: st.oy, zone: 'bottom' });
+      parts.push({ key: m, ox: bx2, oy: st.oy, zone: 'bottom' });
       bottom = bbox(st.placed)[3];
     });
 
@@ -326,5 +368,6 @@
     shift: shift,
     shiftChains: shiftChains,
     vietnameseUpper: vietnameseUpper,
+    latinUpper: latinUpper,
   };
 });

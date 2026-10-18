@@ -22,18 +22,22 @@
   // below for the dot below and the comma tail. Sizes everywhere — preview
   // px, OTF units — are em sizes, exactly like any installed font. The
   // ascender and descender are re-measured from the ink (measureStacks).
-  var CAP_EM = 0.70, WORD_EM = 0.24;
+  var CAP_EM = 0.70;
+  function wordEm() { return 0.18 + 0.0086 * state.spacing; }   // 0.24em at the default Spacing
   var ASC_EM = 1.02, DESC_EM = 0.25;
 
   var LETTERS = Object.keys(BASE).filter(function (k) { return !isMark(k); });
   var MARK_KEYS = GC.MARK_ORDER.filter(function (k) { return BASE[k]; });
   var VIET = GC.vietnameseUpper();
+  // every other Latin capital the mark skeletons can build (Ä Ç Č Ñ Ž …)
+  var LATIN = GC.latinUpper(function (k) { return !!BASE[k]; });
   var ALNUM = /^[A-Z0-9]$/;
   var SETS = [
     ['Uppercase', Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ')],
     ['Numerals', Array.from('0123456789')],
     ['Punctuation', LETTERS.filter(function (k) { return !ALNUM.test(k); })],
     ['Vietnamese', VIET],
+    ['Latin', LATIN],
     ['Marks', MARK_KEYS],
   ];
   var ORDER = [];
@@ -107,7 +111,8 @@
       L.scale, L.gapTop, L.gapStack, L.gapBottom].join('|');
   }
   function verOf(L) { return (isMark(L) ? 0 : globalVer) + '.' + letterVer[L]; }
-  function hasKey(k) { return !!FLAT[k]; }
+  var own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+  function hasKey(k) { return own(FLAT, k); }
 
   function traceChains(chains, key, tag) {
     var k = 't|' + key + '|' + tag;
@@ -140,15 +145,28 @@
     var c = compositeOf(L);
     return c ? c.rings : [];
   }
-  function canDraw(L) { return (FLAT[L] && !isMark(L)) || !!GC.plan(L, hasKey); }
+  function canDraw(L) { return (hasKey(L) && !isMark(L)) || !!GC.plan(L, hasKey); }
+  // the letter an accented glyph is built on (Ấ -> A, Ơ -> O); itself otherwise
+  function baseOf(L) { var p = !hasKey(L) && GC.plan(L, hasKey); return p ? p.base : L; }
   // path strings are cached per traced ring set (rings are immutable once
   // traced), so a spacing-only change rebuilds no geometry text at all
   var dCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function ringsToD(rings) {
+    if (state.draft) return ringsToPoly(rings);   // live slider/global drag: plain polylines, curves on release
     var hit = dCache && dCache.get(rings);
     if (hit !== undefined) return hit;
     var d = ringsToDRaw(rings);
     if (dCache) dCache.set(rings, d);
+    return d;
+  }
+  function ringsToPoly(rings) {
+    var d = '';
+    for (var i = 0; i < rings.length; i++) {
+      var r = rings[i];
+      d += 'M' + r[0][0].toFixed(1) + ',' + r[0][1].toFixed(1);
+      for (var j = 1; j < r.length; j++) d += 'L' + r[j][0].toFixed(1) + ',' + r[j][1].toFixed(1);
+      d += 'Z';
+    }
     return d;
   }
   // smooth cubics through the traced points (BlobEngine.ringToCubics)
@@ -232,20 +250,23 @@
   function spacingOf(L) {
     if (SPC[L]) return SPC[L];
     var rings = ringsOf(L), fr = rowFrame();
-    var bb = GC.bbox(rings) || [0, MET.cap, MET.capH * 0.3, MET.base];
+    // a composite is spaced from its letter (plain or fused): floating
+    // accents may overhang, the kerning floor keeps them off neighbours
+    var comp = !FLAT[L] && compositeOf(L);
+    var bb = GC.bbox(comp ? comp.baseRings : rings) || [0, MET.cap, MET.capH * 0.3, MET.base];
     var pr = profileOf(rings, fr);
-    // average white depth per side over the cap band, capped so one deep
-    // notch (the inside of a T's arm) can't dominate
+    // average white depth per side over the cap band; a side that is open
+    // for most of its height (L's right, T's) may go past the usual cap
     var dmax = 0.30 * MET.capH, dl = 0, dr = 0, n = 0;
     for (var i = 0; i < ROWS; i++) {
       var y = fr.y0 + (i + 0.5) * fr.st;
       if (y < fr.c0 || y > fr.c1 || !isFinite(pr.lo[i])) continue;
-      dl += Math.min(pr.lo[i] - bb[0], dmax); dr += Math.min(bb[2] - pr.hi[i], dmax); n++;
+      dl += Math.min(pr.lo[i] - bb[0], 1.4 * dmax); dr += Math.min(bb[2] - pr.hi[i], 1.4 * dmax); n++;
     }
     dl = n ? dl / n / dmax : 0; dr = n ? dr / n / dmax : 0;
     var sp = state.spacing * MET.capH / 100, k = 1;
     var lsb = sp * (1 - k * dl), rsb = sp * (1 - k * dr);
-    var adj = state.metrics[L];
+    var adj = own(state.metrics, L) && state.metrics[L];
     if (adj) { lsb += adj[0]; rsb += adj[1]; }
     return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi });
   }
@@ -263,7 +284,9 @@
   function kernOf(a, b) {
     if (!a || !b) return 0;
     var key = a + '\u0000' + b;
-    if (state.kernOv[key] != null) return state.kernOv[key];   // a designer's own value wins
+    if (own(state.kernOv, key)) return state.kernOv[key];   // a designer's own value wins
+    var bk = baseOf(a) + '\u0000' + baseOf(b);               // ...and reaches Á Ấ Ạ when set on A
+    if (bk !== key && own(state.kernOv, bk)) return state.kernOv[bk];
     if (!(state.kern > 0)) return 0;
     if (key in KERN) return KERN[key];
     if (KBASE == null) {
@@ -271,22 +294,38 @@
       KBASE = Math.max(1, h.lsb + h.rsb);
       KOVER = interaction(h, h).over;   // H|H is the zero point: only extra shared white counts
     }
-    var it = interaction(spacingOf(a), spacingOf(b)), v = 0;
+    var A = spacingOf(a), B = spacingOf(b), it = interaction(A, B), v = 0;
     if (isFinite(it.minG)) {
       v = -(it.nest + 0.5 * Math.max(0, it.over - KOVER)) * state.kern;
-      v = Math.max(v, 0.4 * KBASE - it.minG);                       // ink floor
-      v = Math.min(0.25 * KBASE, Math.max(-0.45 * MET.capH, v));    // sane range
+      v = Math.max(v, -0.45 * MET.capH, -0.6 * Math.min(A.adv, B.adv));   // never tuck a whole glyph under
+      v = Math.min(v, 0.25 * KBASE);
+      v = Math.max(v, 0.4 * KBASE - it.minG);   // the ink floor always wins (Ấ|Ầ: two side tones meeting)
     }
     if (Math.abs(v) < 0.6) v = 0;
     return (KERN[key] = v);
   }
+  // the nearest-ink test looks ±10% of the cap height up and down, so a
+  // period tucked beside the low bar of a 4 is still seen as close
+  function dilate(prof, k, hiSide) {
+    var out = [];
+    for (var i = 0; i < ROWS; i++) {
+      var v = hiSide ? -Infinity : Infinity;
+      for (var j = Math.max(0, i - k); j <= Math.min(ROWS - 1, i + k); j++) {
+        if (hiSide ? prof[j] > v : prof[j] < v) v = prof[j];
+      }
+      out.push(v);
+    }
+    return out;
+  }
   function interaction(A, B) {
     var fr = rowFrame(), cap = 0.3 * MET.capH;
-    var minG = Infinity, over = 0, n = 0;
+    var minG = Infinity, over = 0, n = 0, k = Math.max(1, Math.round(0.1 * MET.capH / fr.st));
+    if (!A.hiD) A.hiD = dilate(A.hi, k, true);
+    if (!B.loD) B.loD = dilate(B.lo, k, false);
     for (var i = 0; i < ROWS; i++) {
       var ha = isFinite(A.hi[i]), hb = isFinite(B.lo[i]);
-      if (ha && hb) {
-        var g = (A.x1 - A.hi[i]) + A.rsb + B.lsb + (B.lo[i] - B.x0);
+      if (isFinite(A.hiD[i]) && isFinite(B.loD[i])) {
+        var g = (A.x1 - A.hiD[i]) + A.rsb + B.lsb + (B.loD[i] - B.x0);
         if (g < minG) minG = g;
       }
       var y = fr.y0 + (i + 0.5) * fr.st;
@@ -339,7 +378,7 @@
   // demand.
   var extraKeys = {};
   // a lone mark is shown where it would sit on a host letter
-  function markHost(m) { return m === '̵' ? 'D' : 'O'; }
+  function markHost(m) { return m === '\u0335' ? 'D' : 'O'; }
   function markPlacement(m) {
     var c = compositeOf(markHost(m) + m), part = null;
     if (c) c.parts.forEach(function (p) { if (p.key === m) part = p; });
@@ -366,15 +405,24 @@
       out.push([gid(c.baseKey), '<path id="' + gid(c.baseKey) + '" d="' + ringsToD(c.baseRings) + '" fill-rule="nonzero"/>']);
     }
     var m = markD && markD.get(c);
-    if (m === undefined) { m = ringsToDRaw(c.rings.slice(c.baseCount)); if (markD) markD.set(c, m); }
+    if (m === undefined) {
+      m = state.draft ? ringsToPoly(c.rings.slice(c.baseCount)) : ringsToDRaw(c.rings.slice(c.baseCount));
+      if (markD && !state.draft) markD.set(c, m);
+    }
     out.push([gid(L), '<g id="' + gid(L) + '"><use href="#' + gid(c.baseKey) + '"/><path d="' + m + '" fill-rule="nonzero"/></g>']);
   }
   function refreshDefs() {
     SPC = {}; KERN = {}; KBASE = null; fusedDefs = {};
     measureMetrics();
-    measureStacks();
+    if (!state.draft) measureStacks();   // ascender/descender settle on release
     var list = [];
     MARK_KEYS.concat(LETTERS, VIET, Object.keys(extraKeys)).forEach(function (L) { defEntries(L, list); });
+    // the wider Latin set follows a beat later while a slider is moving
+    LATIN.forEach(function (L) {
+      var id = gid(L);
+      if (state.draft && lastDefs[id]) list.push([id, lastDefs[id]]);
+      else defEntries(L, list);
+    });
     var changed = list.filter(function (e) { return lastDefs[e[0]] !== e[1]; });
     if (changed.length > list.length / 3 || !defsInner.firstChild) {
       defsInner.innerHTML = list.map(function (e) { return e[1]; }).join('');
@@ -389,7 +437,7 @@
     list.forEach(function (e) { lastDefs[e[0]] = e[1]; });
   }
   function ensureDef(L) {
-    if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0) return;
+    if (extraKeys[L] || LETTERS.indexOf(L) >= 0 || VIET.indexOf(L) >= 0 || LATIN.indexOf(L) >= 0) return;
     extraKeys[L] = 1;
     var list = [];
     defEntries(L, list);
@@ -615,7 +663,7 @@
   }
 
   function fillText(holder, text, size, tr) {
-    var k = size / MET.em, space = WORD_EM * size + tr * size;
+    var k = size / MET.em, space = wordEm() * size + tr * size;
     text.split(/\s+/).forEach(function (chunk) {
       if (!chunk) return;
       var word = document.createElement('span');
@@ -949,6 +997,7 @@
     // a node) doesn't wipe the redo stack
     drag = { idx: idx, mode: mode, key: n.key, src: n.idx, s: n.s, zone: n.zone, sx: e.clientX, sy: e.clientY,
              start: effNodes(n.key)[n.idx].slice(), moved: false, snap: snapshot() };
+    if (state.globalEdit && !isMark(n.key)) state.draft = true;   // a global drag reshapes every letter: trace coarse until release
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     renderEditor();
@@ -976,6 +1025,7 @@
     window.removeEventListener('pointerup', onUp);
     var moved = drag && drag.moved;
     drag = null;
+    if (state.draft) { draftOff(); return; }
     if (moved) { markDirty(); schedule(); }   // schedule: refresh the character-set frames skipped mid-drag
   }
 
@@ -1205,7 +1255,7 @@
     pairK.disabled = !ab;
     pairPv.innerHTML = '';
     if (!ab) { pairK.value = ''; return; }
-    var key = ab[0] + '\u0000' + ab[1], v = kernOf(ab[0], ab[1]), manual = state.kernOv[key] != null;
+    var key = ab[0] + '\u0000' + ab[1], v = kernOf(ab[0], ab[1]), manual = own(state.kernOv, key);
     if (document.activeElement !== pairK) pairK.value = v.toFixed(1);
     pairK.classList.toggle('manual', manual);
     $('btnPairAuto').disabled = !manual;
@@ -1222,7 +1272,9 @@
     var ab = pairKeys(), v = parseFloat(pairK.value);
     if (!ab || !isFinite(v)) { updatePair(); return; }
     pushUndo();
-    state.kernOv[ab[0] + '\u0000' + ab[1]] = Math.max(-60, Math.min(30, v));
+    var cv = Math.max(-60, Math.min(30, v));
+    if (cv !== v) toast('Kerning is limited to −60 … +30 units; set ' + cv);
+    state.kernOv[ab[0] + '\u0000' + ab[1]] = cv;
     KERN = {}; schedule(); markDirty();
   });
   $('btnPairAuto').addEventListener('click', function () {
@@ -1484,8 +1536,8 @@
   }
   renderSwatches();
   function updateCoverage() {
-    var n = LETTERS.length + VIET.filter(canDraw).length;
-    $('glyphCountMeta').textContent = n + ' glyphs · Việt ' + VIET.filter(canDraw).length + '/' + VIET.length;
+    var v = VIET.filter(canDraw).length, l = LATIN.filter(canDraw).length;
+    $('glyphCountMeta').textContent = (LETTERS.length + v + l) + ' glyphs · Việt ' + v + '/' + VIET.length + ' · Latin +' + l;
   }
 
   // ------------------------------------------------------------ persistence
@@ -1530,7 +1582,7 @@
   }
   // {key: {index: [dx, dy, dr]}} with sane numbers only
   function cleanOv(o, flat) {
-    var out = {};
+    var out = Object.create(null);
     if (!o || typeof o !== 'object') return out;
     Object.keys(o).forEach(function (i) {
       var d = o[i];
@@ -1561,15 +1613,16 @@
     q.shape.smooth = Math.round(q.shape.smooth);
     var spc = p.spacing || {};
     q.spacing = num(spc.spacing, 0, 20, 7); q.kern = num(spc.kern, 0, 1, 0.7);
-    q.metrics = {};
+    var hasB = function (x) { return own(BASE, x); };
+    q.metrics = Object.create(null);
     if (spc.metrics && typeof spc.metrics === 'object') Object.keys(spc.metrics).forEach(function (k) {
       var m = spc.metrics[k];
-      if (BASE[k] || GC.plan(k, function (x) { return !!BASE[x]; })) {
+      if (hasB(k) || GC.plan(k, hasB)) {
         if (Array.isArray(m) && isFinite(m[0]) && isFinite(m[1])) q.metrics[k] = [num(m[0], -60, 60, 0), num(m[1], -60, 60, 0)];
       }
     });
-    q.kernOv = {};
-    var hasK = function (x) { return !!BASE[x]; };
+    q.kernOv = Object.create(null);
+    var hasK = hasB;
     if (spc.pairs && typeof spc.pairs === 'object') Object.keys(spc.pairs).slice(0, 5000).forEach(function (k) {
       var ab = k.split('\u0000'), v = +spc.pairs[k];
       if (ab.length === 2 && isFinite(v) && ab.every(function (g) { return GC.plan(g, hasK); })) q.kernOv[k] = num(v, -60, 30, 0);
@@ -1577,17 +1630,20 @@
     var mk = p.marks || {};
     q.marks = { scale: num(mk.scale, 0.6, 1.5, 1), gapTop: num(mk.gapTop, 0, 20, 6), gapStack: num(mk.gapStack, 0, 20, 3), gapBottom: num(mk.gapBottom, 0, 20, 6) };
     q.flat = {};
-    Object.keys(BASE).forEach(function (k) { q.flat[k] = p.flat && validFlat(p.flat[k]) ? p.flat[k] : flatten(BASE[k]); });
+    Object.keys(BASE).forEach(function (k) { q.flat[k] = p.flat && own(p.flat, k) && validFlat(p.flat[k]) ? p.flat[k] : flatten(BASE[k]); });
     q.globalOv = cleanOv(p.globalOv, null);
-    q.letterOv = {};
+    q.letterOv = Object.create(null);
     if (p.letterOv && typeof p.letterOv === 'object') Object.keys(p.letterOv).forEach(function (k) {
-      if (q.flat[k]) q.letterOv[k] = cleanOv(p.letterOv[k], q.flat[k]);
+      if (own(q.flat, k)) q.letterOv[k] = cleanOv(p.letterOv[k], q.flat[k]);
     });
-    q.globalExempt = {};
-    if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (BASE[k]) q.globalExempt[k] = true; });
+    q.globalExempt = Object.create(null);
+    if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (hasB(k)) q.globalExempt[k] = true; });
     if (Array.isArray(p.blocks)) {
+      var budget = 20000;   // total preview text: a 200k-character file would freeze the tab
       q.blocks = p.blocks.slice(0, 40).map(function (b) {
-        return block(String((b && b.text) || '').slice(0, 5000), num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
+        var t = String((b && b.text) || '').slice(0, Math.max(0, Math.min(5000, budget)));
+        budget -= t.length;
+        return block(t, num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
       });
     }
     return q;
@@ -1644,7 +1700,7 @@
   // Lay a block out the same way the preview does: em-sized glyphs, measured
   // spacing, kerning, tracking, word wrap at maxW. Returns placed glyphs.
   function layoutBlock(b, maxW) {
-    var k = b.size / MET.em, trk = b.tr * b.size, space = WORD_EM * b.size + trk;
+    var k = b.size / MET.em, trk = b.tr * b.size, space = wordEm() * b.size + trk;
     var lines = [[]], x = 0, lineW = [0];
     b.text.split(/\s+/).forEach(function (chunk) {
       if (!chunk) return;
@@ -1763,7 +1819,7 @@
   // Lowercase input maps onto the caps; combining marks are zero-width so
   // decomposed text still lands its accents; kerning goes into a GPOS table.
   function buildOtf() {
-    var UPM = 1000, SC = UPM / MET.em;
+    var UPM = 2000, SC = UPM / MET.em;   // a finer grid halves rounding: smoother curve joins
     var tx = function (x) { return Math.round(x * SC); }, ty = function (y) { return Math.round((MET.base - y) * SC); };
     // cubic outlines, the same curves the preview draws
     function pathOf(rings, dx) {
@@ -1787,14 +1843,15 @@
       return BlobEngine.signedArea(big) < 0 ? rings : rings.map(function (r) { return r.slice().reverse(); });
     }
     var nd = new opentype.Path(), w = Math.round(UPM * 0.5), hcap = Math.round(UPM * CAP_EM);
-    nd.moveTo(50, 0); nd.lineTo(50, hcap); nd.lineTo(w - 50, hcap); nd.lineTo(w - 50, 0); nd.close();
-    nd.moveTo(100, 50); nd.lineTo(w - 100, 50); nd.lineTo(w - 100, hcap - 50); nd.lineTo(100, hcap - 50); nd.close();
+    var e1 = UPM * 0.05, e2 = UPM * 0.1;   // outer counter-clockwise, inner clockwise (y up)
+    nd.moveTo(e1, 0); nd.lineTo(w - e1, 0); nd.lineTo(w - e1, hcap); nd.lineTo(e1, hcap); nd.close();
+    nd.moveTo(e2, e1); nd.lineTo(e2, hcap - e1); nd.lineTo(w - e2, hcap - e1); nd.lineTo(w - e2, e1); nd.close();
     var glyphs = [
       new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: w, path: nd }),
-      new opentype.Glyph({ name: 'space', unicode: 32, advanceWidth: Math.round(WORD_EM * UPM), path: new opentype.Path() }),
+      new opentype.Glyph({ name: 'space', unicode: 32, advanceWidth: Math.round(wordEm() * UPM), path: new opentype.Path() }),
     ];
     glyphs[1].addUnicode(0xA0);
-    var index = {}, keys = LETTERS.concat(VIET.filter(canDraw));
+    var index = {}, keys = LETTERS.concat(VIET.filter(canDraw), LATIN.filter(canDraw));
     keys.forEach(function (L) {
       var s = spacingOf(L), rings = orient(ringsOf(L));
       var g = new opentype.Glyph({
@@ -1811,7 +1868,7 @@
     // anchor is the point on that O where they attach (its ink centre on the
     // cap line, or on the baseline for the dot below); every letter gets the
     // same two anchors at its own ink centre, so GPOS mark-to-base lands an
-    // accent on any letter — even sequences with no precomposed glyph (Q̃).
+    // accent on any letter — even sequences with no precomposed glyph (Q\u0303).
     var o = spacingOf('O'), oPlain = GC.bbox(ringsOf('O')) || [0, 0, GW, GH];
     var oDx = o.lsb - o.x0 - o.adv, markSpec = { classes: { top: [], bottom: [] }, bases: [] }, gdefCls = {};
     MARK_KEYS.forEach(function (m) {
@@ -1851,14 +1908,16 @@
     keys.forEach(function (a) {
       keys.forEach(function (b) {
         var v = Math.round(kernOf(a, b) * SC);
-        if (state.kernOv[a + '\u0000' + b] != null && v) { pairs.push([index[a], index[b], v]); return; }
-        if (Math.abs(v) >= 8) pairs.push([index[a], index[b], v]);   // under 0.8% em is invisible
+        if (own(state.kernOv, a + '\u0000' + b) && v) { pairs.push([index[a], index[b], v]); return; }
+        if (Math.abs(v) >= UPM * 0.008) pairs.push([index[a], index[b], v]);   // under 0.8% em is invisible
       });
     });
     // drop the name records opentype.js would otherwise fill with a blank
     ['designerURL', 'manufacturerURL', 'license', 'licenseURL', 'trademark'].forEach(function (k) { delete font.names[k]; });
     var buf = font.toArrayBuffer(), extra = {};
     var gpos = FontTables.gpos({ kern: pairs, marks: markSpec }), gdef = FontTables.gdef(gdefCls);
+    var ext = { advMax: 0, minL: 0, minR: 0, xMaxExt: 0 }, yMaxAll = 0, yMinAll = 0;
+    var fontAsc = Math.round(UPM * ASC_EM), fontDesc = -Math.round(UPM * DESC_EM);
     // hmtx: opentype.js 1.3.4 ignores leftSideBearing, so write xMin per glyph
     var hmtx = FontTables.readTable(buf, 'hmtx'), hhea = FontTables.readTable(buf, 'hhea');
     if (hmtx && hhea) {
@@ -1866,6 +1925,11 @@
       var nh = new DataView(hhea.buffer, hhea.byteOffset, hhea.byteLength).getUint16(34);
       glyphs.forEach(function (g, i) {
         var bb = g.path.commands.length ? g.getBoundingBox() : null, lsb = bb ? Math.round(bb.x1) : 0;
+        ext.advMax = Math.max(ext.advMax, g.advanceWidth || 0);
+        if (bb) {
+          ext.minL = Math.min(ext.minL, lsb); ext.minR = Math.min(ext.minR, Math.round((g.advanceWidth || 0) - bb.x2));
+          ext.xMaxExt = Math.max(ext.xMaxExt, Math.round(bb.x2)); yMaxAll = Math.max(yMaxAll, Math.round(bb.y2)); yMinAll = Math.min(yMinAll, Math.round(bb.y1));
+        }
         var at = i < nh ? i * 4 + 2 : nh * 4 + (i - nh) * 2;
         if (at + 2 <= hmtx.length) hd.setInt16(at, lsb);
       });
@@ -1882,12 +1946,45 @@
       od.setUint16(62, od.getUint16(62) | 0x80);
       od.setInt16(72, 0);   // sTypoLineGap
       od.setUint32(78, od.getUint32(78) | 1 | (1 << 8));   // code pages: Latin 1 + Vietnamese (1258)
+      // Windows metrics = hhea/typo (both already cover every glyph's ink)
+      od.setUint16(74, Math.max(fontAsc, yMaxAll)); od.setUint16(76, Math.max(-fontDesc, -yMinAll));
       extra['OS/2'] = os2;
+    }
+    // hhea extents opentype.js leaves at 0: advanceWidthMax, minLSB, minRSB, xMaxExtent
+    if (hhea) {
+      var hv = new DataView(hhea.buffer, hhea.byteOffset, hhea.byteLength);
+      hv.setUint16(10, ext.advMax); hv.setInt16(12, ext.minL); hv.setInt16(14, ext.minR); hv.setInt16(16, ext.xMaxExt);
+      extra.hhea = hhea;
     }
     buf = FontTables.injectTables(buf, extra);
     dl(new Blob([buf], { type: 'font/otf' }), safeName() + '.otf');
     return glyphs.length;
   }
+
+  // a small read-only window into the engine, for tests and the console
+  window.LiquidFont = {
+    kern: function (a, b) { return kernOf(a, b); },
+    spacing: function (L) { var s = spacingOf(L); return { lsb: s.lsb, rsb: s.rsb, adv: s.adv, x0: s.x0, x1: s.x1 }; },
+    metrics: function () { return { base: MET.base, cap: MET.cap, em: MET.em, ascender: ASC_EM, descender: DESC_EM }; },
+    glyphs: function () { return LETTERS.concat(VIET, LATIN); },
+    // true 2D distance between the inks of a set pair, glyph units (tests)
+    pairGap: function (a, b) {
+      var A = spacingOf(a), B = spacingOf(b), shift = A.adv + kernOf(a, b) - (B.x0 - B.lsb) + (A.x0 - A.lsb);
+      var ra = ringsOf(a), rb = GC.shift(ringsOf(b), shift, 0), ba = GC.bbox(ra), bb = GC.bbox(rb);
+      if (!ba || !bb) return Infinity;
+      var best = Infinity;
+      ra.forEach(function (r) { r.forEach(function (p) {
+        if (p[0] < bb[0] - 20) return;
+        rb.forEach(function (q) { for (var k = 0; k < q.length; k++) {
+          var u = q[k], v = q[(k + 1) % q.length], dx = v[0] - u[0], dy = v[1] - u[1], l2 = dx * dx + dy * dy;
+          var t = l2 ? Math.max(0, Math.min(1, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / l2)) : 0;
+          var d = Math.hypot(p[0] - u[0] - t * dx, p[1] - u[1] - t * dy);
+          if (d < best) best = d;
+        } });
+      }); });
+      return best;
+    },
+  };
 
   // -------------------------------------------------------------------- boot
   var restored = false;
