@@ -161,6 +161,48 @@ next glyph, Tab (canvas focused) cycles nodes, arrows nudge (Shift ×10),
 Alt+arrows swell/pinch, Delete removes a node, Esc deselects. `Keys` in the
 topbar lists them.
 
+## Preview text
+
+The preview blocks are live text: click or tap anywhere in one (or Tab to it)
+and type — there is no separate text box. The caret is a thin bar in the
+block's ink, cap-height tall; it blinks, and holds still with reduced motion.
+Arrow keys move letter by letter (an accented letter is one step: the caret
+never lands between a letter and its marks), Up/Down and Home/End follow the
+lines as they are drawn, Shift extends the selection, a drag selects, a
+double-click selects a word and Ctrl/⌘A the whole block; a drag held at the
+top or bottom edge scrolls. Right-click gives the usual Cut / Copy / Paste on
+the selection. Enter starts a new line. Esc (or Ctrl/⌘ Enter) leaves the text
+for the block itself — Tab then moves on to its controls, Enter goes back in —
+and a click outside leaves it too; while a preview has focus the editor
+shortcuts above stay out of the way (Ctrl/⌘S still saves).
+
+Keys go to an invisible native textarea kept at the caret, so IME composition
+(Vietnamese Telex / VNI, macOS Vietnamese, dead keys, mobile keyboards),
+paste and screen readers all work as in any text field. Undo is the app's:
+each typing burst — the first edit after focusing, after a pause or after
+moving the caret; each paste or cut — is one Ctrl/⌘Z step, on the same stack
+as glyph edits; typing over a selection (after Ctrl/⌘A, a drag) starts a new
+step too. An undo that brings a block back or removes one keeps the caret in
+the block you were typing in (blocks keep a stable id), and an undo of typing
+leaves focus where it was. Each preview's text field is labelled with its
+position and size for screen readers. A block holds up to 5,000 characters
+and all blocks together 20,000 (what a project file keeps); the project
+autosaves half a second after you stop, and at once when the tab is hidden or
+closed.
+
+Spaces are never collapsed: every space (or tab) is one word space, so two
+spaces show as two; `\n` is a hard line break. Lines wrap between words, and
+the spaces where a line wraps hang past the right edge (as in any text field,
+the caret stays at the edge until the next word starts). A word wider than
+the column shrinks the block to fit, down to 8px; one still too wide breaks
+between letters. Accents on the first line that rise above its leading add
+just enough room above it. An emoji, flag or ZWJ sequence the font can't draw
+is one dashed box and one caret step. The SVG / PNG specimen exports use this
+same layout and fit rule, line breaks included.
+
+In Windows High Contrast (forced colours) the caret and focus rule are drawn
+in the system text colour and the selection in the system highlight.
+
 ## Vietnamese and diacritics
 
 Accented letters are composed, never drawn twice. Each mark — acute, grave,

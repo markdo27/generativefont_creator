@@ -20,9 +20,9 @@ setTimeout(()=>{
   console.log('block0 name:',t0.querySelector('.tester-name').textContent);
   console.log('block0 ctrls:',t0.querySelectorAll('.tester-ctrl').length,'| values:',
     [...t0.querySelectorAll('.tester-ctrl b')].map(x=>x.textContent).join(' '));
-  console.log('block0 glyph instances:',t0.querySelectorAll('.tester-text svg').length,
-    '| words:',t0.querySelectorAll('.word').length);
-  console.log('uses (not duplicated paths):',t0.querySelectorAll('use').length);
+  console.log('block0 glyph instances:',t0.querySelectorAll('.tester-ink use').length,
+    '| one svg per block:',t0.querySelectorAll('.tester-text svg').length===1);
+  console.log('uses (not duplicated paths):',t0.querySelectorAll('use').length,'| paths in block:',t0.querySelectorAll('.tester-text path').length);
   console.log('paper block present:',!!d.querySelector('.tester.paper'));
   console.log('glyph set groups:',d.querySelectorAll('.glyphset-group').length,
     '| cells:',d.querySelectorAll('.glyph-cell').length);
@@ -70,7 +70,7 @@ setTimeout(()=>{
       const r=t0.querySelector('.tester-ctrl input');
       r.value=200; r.dispatchEvent(new w.Event('input',{bubbles:true}));
       console.log('after size change -> label:',t0.querySelector('.tester-ctrl b').textContent,
-        '| glyph h:',t0.querySelector('.tester-text svg').getAttribute('height'));
+        '| block h:',t0.querySelector('.tester-glyphs').getAttribute('height'));
 
       // shape param must update every preview through the shared defs
       const before=defs.querySelector('path').getAttribute('d').length;
@@ -84,13 +84,28 @@ setTimeout(()=>{
         // --- Vietnamese: composites live in the shared defs and render from NFC and NFD text
         console.log('Vietnamese defs present (Ấ Ặ Ự Đ):',
           ['1ea4','1eb6','1ef0','110'].every(h=>!!d.getElementById('g'+h)));
-        const vb=d.querySelectorAll('.tester')[0], vt=vb.querySelector('.tester-text');
-        vt.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
-        const ta=vb.querySelector('.tester-edit');
-        ta.value='TIE\u0302\u0301NG vie\u0323\u0302t \u2713'; ta.dispatchEvent(new w.Event('blur'));
-        const uses=[...vb.querySelectorAll('.tester-text use')].map(u=>u.getAttribute('href'));
+        // typing goes straight into the preview: an invisible textarea is the input sink
+        const vb=d.querySelectorAll('.tester')[0], ta=vb.querySelector('.tester-input');
+        vb.querySelector('.tester-body').dispatchEvent(new w.MouseEvent('mousedown',{bubbles:true,button:0,detail:1}));
+        console.log('click focuses the preview text, no text box:',d.activeElement===ta,
+          '| old .tester-edit gone:',!d.querySelector('.tester-edit'),'| aria-label:',ta.getAttribute('aria-label'));
+        ta.value='TIE\u0302\u0301NG vie\u0323\u0302t \u2713'; ta.setSelectionRange(3,3);
+        ta.dispatchEvent(new w.Event('input',{bubbles:true}));
+
+      setTimeout(()=>{
+        const uses=[...vb.querySelectorAll('.tester-ink use')].map(u=>u.getAttribute('href'));
         console.log('NFD + lowercase text uses composites:',uses.includes('#g1ebe')&&uses.includes('#g1ec6'),
-          '| unknown char drawn as notdef box:',vb.querySelectorAll('svg.notdef').length===1);
+          '| unknown char drawn as notdef box:',vb.querySelectorAll('.tester-ink .notdef').length===1);
+        console.log('caret snapped out of the cluster (3 -> 5):',ta.selectionStart,
+          '| caret shown:',!!vb.querySelector('.tester-text.is-focused .tester-caret.on'));
+        const LF=w.LiquidFont;
+        console.log('Enter = hard line break, spaces kept:',JSON.stringify(LF.layout('AB\nCD  EF',100)),
+          '| wraps at spaces:',JSON.stringify(LF.layout('HELLO WORLD',100,200)));
+        console.log('Ctrl+Z inside the preview is app undo:',(()=>{
+          ta.dispatchEvent(new w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}));
+          return d.querySelectorAll('.tester')[0].querySelector('.tester-input').value==='LIQUID TYPE 2026';
+        })(),'| focus kept:',d.activeElement&&d.activeElement.className);
+        d.activeElement.blur();
 
         // composite selected in the editor exposes base + mark nodes
         const vcell=[...d.querySelectorAll('.glyph-cell')].find(c=>c.dataset.letter==='\u1EA4');
@@ -108,6 +123,7 @@ setTimeout(()=>{
           console.log('ALL CHECKS DONE');
           process.exit(0);
         },900);
+      },120);
       },260);
     },260);
   },260);
