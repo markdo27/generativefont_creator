@@ -191,8 +191,10 @@ _ub = ell(46, 66, 27, bot_y(15.5) - 66, [180, 135, 90, 45, 0], 15.5, 15.5)
 G['U'] = [[[19, 6, 19], [19, 40, 15]] + _ub + [[73, 40, 15], [73, 6, 19]]]
 G['V'] = [[[11, flat_top(18), 18], [29, 50, 14], [46, flat_bot(19) + OVER, 19], [63, 50, 14],
            [81, flat_top(18), 18]]]
-G['W'] = [[[0, flat_top(16), 16], [11, 50, 12], [22, flat_bot(15.5) + 1, 15.5], [34, 66, 11], [46, 36, 11.5],
-           [58, 66, 11], [70, flat_bot(15.5) + 1, 15.5], [81, 50, 12], [92, flat_top(16), 16]]]
+# W: wider than V, with thinner inner strokes and a lower middle apex, so the
+# two notches stay open even in the heavy presets (they clotted in molten)
+G['W'] = [[[-3, flat_top(16), 16], [9, 50, 12], [21, flat_bot(15) + 1, 15], [33, 70, 9.5], [46, 42, 10],
+           [59, 70, 9.5], [71, flat_bot(15) + 1, 15], [83, 50, 12], [95, flat_top(16), 16]]]
 G['X'] = [[[13, flat_top(17), 17], [46, 50, 13.5], [79, flat_bot(19), 19]],
           [[79, flat_top(17), 17], [46, 50, 13.5], [13, flat_bot(19), 19]]]
 G['Y'] = [[[13, flat_top(17), 17], [46, 52, 13.5], [79, flat_top(17), 17]],
