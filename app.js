@@ -1695,7 +1695,10 @@
     '&': 'ampersand', '+': 'plus', '=': 'equal', '*': 'asterisk', '#': 'numbersign', '%': 'percent', '@': 'at',
     '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five', '6': 'six', '7': 'seven',
     '8': 'eight', '9': 'nine', '–': 'endash', '—': 'emdash', '‘': 'quoteleft', '’': 'quoteright',
-    '“': 'quotedblleft', '”': 'quotedblright' };
+    '“': 'quotedblleft', '”': 'quotedblright', '$': 'dollar', '\u20AB': 'dong', '\u20AC': 'Euro',
+    '\u00A9': 'copyright', '\u2026': 'ellipsis', '\u00B0': 'degree', '[': 'bracketleft', ']': 'bracketright',
+    '{': 'braceleft', '}': 'braceright', '<': 'less', '>': 'greater', '|': 'bar', '\\': 'backslash',
+    '^': 'asciicircum', '_': 'underscore', '`': 'grave', '~': 'asciitilde' };
   function glyphName(L) {
     if (AGL[L]) return AGL[L];
     if (/^[A-Z]$/.test(L)) return L;

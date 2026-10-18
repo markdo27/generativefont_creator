@@ -129,7 +129,7 @@ BOWL_B = bot_y(14, 1.5)
 
 G['A'] = [[[40, -2, 11], [27, 44, 11], [10, 94, 20]],            # apex split in two: a wider,
           [[52, -2, 11], [65, 44, 11], [82, 94, 20]],            # sturdier counter top; lean
-          [[19, 76, 10], [73, 76, 10]]]                          # legs + bar keep it open in molten
+          [[19, 76, 10.5], [73, 76, 10.5]]]                      # legs + bar keep it open in molten
 G['B'] = [[[20, 6, 19], [19, 49, 13], [20, 94, 20]],
           [[20, 6, 19], [42, top_y(13.5, 1.5), 13.5], [63, 5, 13.5], [72, 21, 14.5], [66, 37, 13], [46, 46.5, 12],
            [22, 48, 11.5]],
@@ -182,9 +182,10 @@ def squeeze(pts, k=0.88, cx=46):
     return [[R(cx + (p[0] - cx) * k)] + p[1:] for p in pts]
 
 
-G['S'] = [squeeze([[76, 20, 15], [64, 4.5, 14.5], [46, top_y(14.5), 14.5], [26, 4, 14.5], [16, 20, 15],
-                   [22, 37, 14.5], [40, 47, 14], [56, 54, 14], [72, 64, 14.5], [77, 81, 15], [68, 96, 14.5],
-                   [47, bot_y(14.5), 14.5], [26, 98, 14.5], [13, 82, 15]])]
+_S = [[76, 20, 15], [64, 4.5, 14.5], [46, top_y(14.5), 14.5], [26, 4, 14.5], [16, 20, 15],
+      [22, 37, 14.5], [40, 47, 14], [56, 54, 14], [72, 64, 14.5], [77, 81, 15], [68, 96, 14.5],
+      [47, bot_y(14.5), 14.5], [26, 98, 14.5], [13, 82, 15]]
+G['S'] = [squeeze(_S)]
 G['T'] = [[[13, flat_top(14.5), 14.5], [79, flat_top(14.5), 14.5]], [[46, 6, 17], [45, 50, 14], [46, 94, 20]]]
 _ub = ell(46, 66, 27, bot_y(15.5) - 66, [180, 135, 90, 45, 0], 15.5, 15.5)
 G['U'] = [[[19, 6, 19], [19, 40, 15]] + _ub + [[73, 40, 15], [73, 6, 19]]]
@@ -263,6 +264,44 @@ G['\u2019'] = [[[47, 0, 16], [39, 26, 8]]]                        # right single
 G['\u201C'] = [[[29, 22, 16], [37, -4, 8]], detached([[63, 22, 16], [71, -4, 8]])]   # left double quote
 G['\u201D'] = [[[29, 0, 16], [21, 26, 8]], detached([[63, 0, 16], [55, 26, 8]])]     # right double quote
 
+# ---------------------------------------------------- symbols and brackets
+# $: the S (86% size, a hair lighter) with the stroke only as stubs above and
+# below; a stroke through the spine clots at text sizes. The stubs melt into
+# the top and bottom curves like any join.
+G['$'] = [[[n[0], R(50.5 + (n[1] - 50.5) * 0.86), R(n[2] - 0.5)] for n in squeeze(_S, 0.86)],
+          [[46, -19, 11], [46, 10, 11.5]], [[46.5, 91, 11.5], [46.5, 120, 11]]]
+# dong sign (U+20AB): a lowercase d, bar across the ascender, rule on the baseline.
+# Bar and rule are their own hard-unioned groups so nothing floods the bowl.
+G['\u20AB'] = [[[66, -8, 15], [66, 30, 13.5], [67, 70, 16]],
+               [[66, 40, 12], [55, 30.5, 12.5], [39, 29.5, 13], [25, 38, 13.5], [20, 51, 14], [24, 64, 13.5],
+                [37, 72.5, 13], [53, 72, 13], [66, 62, 12.5]],
+               detached([[49, 2, 10.5], [85, 2, 10.5]]),
+               detached([[18, 103, 10.5], [82, 103, 10.5]])]
+# euro: a slightly lighter, narrower C with two bars crossing its back, each
+# its own group: melted, the pair fills in solid between them.
+G['\u20AC'] = [sell(53, OCY, 30, ORY, [-36, -90, -135, -180, -225, -270, -324], 15.5, 14.5, 2.3, 14.5),
+               detached([[0, 37, 10], [47, 37, 10]]),
+               detached([[0, 64, 10], [45, 64, 10]])]
+# copyright: a thin ring round a small C (own group, never melts into the ring).
+G['\u00A9'] = [loop(46, 50, 44, 51, 10, 10, 12),
+               detached(ell(48, 50, 17, 20, [-40, -90, -135, -180, -225, -270, -320], 10, 9.5))]
+# ellipsis: three full-size periods, each its own group, apart even in molten.
+G['\u2026'] = [[[3, 97, 17]], detached([[46, 97, 17]]), detached([[89, 97, 17]])]
+G['\u00B0'] = [loop(46, 14, 18, 19, 9.5, 9.5, 8)]                # degree: high ring
+G['['] = [[[64, -9.5, 12.5], [35, -12, 14], [34, 50, 14], [35, 112, 14], [64, 109.5, 12.5]]]  # arms droop
+G[']'] = mirror(G['['])                                           # a hair: clean corners
+G['{'] = [[[64, -12, 12], [48, -6, 12.5], [42, 8, 13], [42, 32, 13], [36, 46, 12.5], [22, 50, 13.5],
+           [36, 54, 12.5], [42, 68, 13], [42, 92, 13], [48, 106, 12.5], [64, 112, 12]]]
+G['}'] = mirror(G['{'])
+G['<'] = [[[72, 18, 13], [20, 52, 14.5], [72, 86, 13]]]
+G['>'] = mirror(G['<'])
+G['|'] = [[[46, -14, 13.5], [46, 50, 13.5], [46, 114, 13.5]]]
+G['\\'] = mirror(G['/'])
+G['^'] = [[[18, 42, 12], [46, 4, 13.5], [74, 42, 12]]]
+G['_'] = [[[2, 113, 13], [90, 113, 13]]]
+G['`'] = [[[32, -6, 14.5], [58, 18, 9.5]]]
+G['~'] = [[[10, 59, 12], [22, 45, 13], [38, 44, 12.5], [54, 58, 12.5], [70, 57, 13], [82, 43, 12]]]
+
 # --- diacritic marks -------------------------------------------------------
 # Same [x, y, r] chains, but in mark space: (0, 0) is the anchor. glyph-compose.js
 # places a top mark so its ink bottom clears the base's ink top, centres its
@@ -286,7 +325,7 @@ M['\u0323'] = [[[0, 0, 15]]]                                                   #
 M['\u0302'] = [[[-17, 3, 9.5], [0, -11, 10.5], [17, 3, 9.5]]]                  # circumflex (mũ)
 M['\u0306'] = [[[-16, -10, 9.5], [-9, 0, 9], [0, 2.5, 9], [9, 0, 9], [16, -10, 9.5]]]  # breve (trăng)
 M['\u031B'] = [[[0, 0, 12], [14, -3, 10.5], [24, -10, 11.5]]]                  # horn (móc), fused
-M['\u0335'] = [[[-28, 0, 11, 1], [7, 0, 10.5]]]          # Đ bar, fused: hard union (own group), stops
+M['\u0335'] = [[[-28, 0, 12, 1], [6, 0, 11.5]]]          # Đ bar, fused: hard union (own group), stops
                                                       # just past the stem so D's counter stays clear
 MARK_KEYS = list(M.keys())
 G.update(M)
@@ -321,7 +360,9 @@ def turn_report():
 
 order = (list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") +
          ['.', ',', '!', '?', "'", '-', ':', ';', '"', '(', ')', '/', '&', '+', '=', '*', '#', '%', '@',
-          '\u2013', '\u2014', '\u2018', '\u2019', '\u201C', '\u201D'] + MARK_KEYS)
+          '\u2013', '\u2014', '\u2018', '\u2019', '\u201C', '\u201D',
+          '$', '\u20AB', '\u20AC', '\u00A9', '\u2026', '\u00B0', '[', ']', '{', '}', '<', '>', '|', '\\',
+          '^', '_', '`', '~'] + MARK_KEYS)
 G = {k: G[k] for k in order}
 data = {'H': H, 'W': W, 'glyphs': G}
 json.dump(data, open('glyphs_meta.json', 'w'))
