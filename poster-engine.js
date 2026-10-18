@@ -642,7 +642,7 @@
     var L = fontRefLines(font);
     if (ch in L.markLine) return L.markLine[ch];
     var cps = Array.from(ch.normalize('NFD')), line = L.cap;
-    if (cps.length > 1 && !/^\p{M}/u.test(cps[0])) {
+    if (cps.length > 1 && !/^\p{M}/u.test(cps[0]) && cps.slice(1).every(function (m) { return /^\p{M}$/u.test(m); })) {
       var b = cps[0], t = null;
       // i/j carry a tittle that is not an accent: measure their dotless forms
       if (b === 'i' || b === 'j') t = glyphTopU(font, b === 'i' ? 'ı' : 'ȷ') || L.xh;
@@ -653,6 +653,9 @@
     L.markLine[ch] = line;
     return line;
   }
+  // Cap height and baseline only mean "accent zone" in the cased alphabets; a
+  // CJK ideograph's top stroke also clears the cap height, and is no accent.
+  var CASED_SCRIPT = /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u;
   // Split one glyph's path commands into contours and route each to the body
   // or the mark layer. `aboveY` / `belowY` are canvas y (y down).
   function routeContours(cmds, aboveY, belowY, body, marks) {
@@ -691,10 +694,13 @@
         g = font.glyphs.get(gi);
         // the character actually drawn (glyphIndexFor may have uppercased it)
         var drawnCh = cmapIndex(font, c) ? c : c.toUpperCase().normalize('NFC');
-        var line = markLineU(font, drawnCh);
-        // a little slack either side: an accent may kiss the line it clears
-        routeContours(g.getPath(x, 0, size).commands,
-          -(line - upm * 0.03) * scale, -upm * 0.01 * scale, cmds, markCmds);
+        var gcmds = g.getPath(x, 0, size).commands;
+        if (CASED_SCRIPT.test(drawnCh.normalize('NFD'))) {
+          // a little slack either side: an accent may kiss the line it clears
+          routeContours(gcmds, -(markLineU(font, drawnCh) - upm * 0.03) * scale, -upm * 0.01 * scale, cmds, markCmds);
+        } else {
+          Array.prototype.push.apply(cmds, gcmds);
+        }
         drawn++;
       } else {
         var d = drawDecomposed(font, c, x, size, cmds, markCmds);
