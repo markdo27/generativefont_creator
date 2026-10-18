@@ -80,8 +80,34 @@ setTimeout(()=>{
         console.log('defs geometry updated by Melt:',before!==after,'(',before,'->',after,')');
         d.getElementById('btnAddBlock').dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
         console.log('after add block:',d.querySelectorAll('.tester').length);
-        console.log('ALL CHECKS DONE');
-        process.exit(0);
+
+        // --- Vietnamese: composites live in the shared defs and render from NFC and NFD text
+        console.log('Vietnamese defs present (Ấ Ặ Ự Đ):',
+          ['1ea4','1eb6','1ef0','110'].every(h=>!!d.getElementById('g'+h)));
+        const vb=d.querySelectorAll('.tester')[0], vt=vb.querySelector('.tester-text');
+        vt.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+        const ta=vb.querySelector('.tester-edit');
+        ta.value='TIE\u0302\u0301NG vie\u0323\u0302t \u2713'; ta.dispatchEvent(new w.Event('blur'));
+        const uses=[...vb.querySelectorAll('.tester-text use')].map(u=>u.getAttribute('href'));
+        console.log('NFD + lowercase text uses composites:',uses.includes('#g1ebe')&&uses.includes('#g1ec6'),
+          '| unknown char drawn as notdef box:',vb.querySelectorAll('svg.notdef').length===1);
+
+        // composite selected in the editor exposes base + mark nodes
+        const vcell=[...d.querySelectorAll('.glyph-cell')].find(c=>c.dataset.letter==='\u1EA4');
+        vcell.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+        console.log('editing Ấ shows mark nodes:',d.querySelectorAll('#editorSvg .mark-node').length>0,
+          '| badge:',d.getElementById('letterBadge').textContent);
+
+        // redo restores what undo took back
+        const handlesOnA=d.querySelectorAll('#editorSvg .node-handle').length;
+        console.log('redo button exists:',!!d.getElementById('btnRedo'));
+        setTimeout(()=>{
+          let saved=null; try{ saved=JSON.parse(w.localStorage.getItem('liquidfont.project.v1')); }catch(e){}
+          console.log('autosaved project in localStorage:',!!(saved&&saved.app==='liquid.font'&&saved.chains&&saved.chains.A),
+            '| node handles on Ấ:',handlesOnA);
+          console.log('ALL CHECKS DONE');
+          process.exit(0);
+        },900);
       },260);
     },260);
   },260);

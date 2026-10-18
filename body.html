@@ -1,63 +1,133 @@
   <!-- one cached path per glyph; every preview instance is a <use> of these -->
   <svg id="glyphDefs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="glyphDefsInner"></defs></svg>
 
+  <a class="skip-link" href="#glyphSet">Skip to character set</a>
+  <a class="skip-link" href="#btnExportOtf">Skip to export</a>
   <div id="app">
     <header class="topbar">
-      <div class="wordmark">LIQUID<span>.</span>FONT</div>
+      <a class="wordmark" href="index.html" title="Liquid.Font">LIQUID<span>.</span>FONT</a>
       <div class="topbar-divider"></div>
-      <input id="fontNameInput" class="fontname-input" value="Ooze" spellcheck="false" />
+      <input id="fontNameInput" class="fontname-input" value="Ooze" spellcheck="false" aria-label="Font name" />
+      <div class="project-group" role="group" aria-label="Project">
+        <button class="text-btn" id="btnNewProject" type="button" title="Start a new font">New</button>
+        <button class="text-btn" id="btnOpenProject" type="button" title="Open a .liquid.json project (Ctrl/⌘ O)">Open</button>
+        <button class="text-btn" id="btnSaveProject" type="button" title="Save the project as a .liquid.json file (Ctrl/⌘ S)">Save</button>
+        <input type="file" id="projectFile" accept=".json,application/json" hidden />
+      </div>
+      <div class="topbar-meta save-state" id="saveState" role="status" aria-live="polite"></div>
       <div class="topbar-spacer"></div>
-      <div class="swatch-row" id="swatchRow"></div>
+      <div class="swatch-row" id="swatchRow" role="group" aria-label="Ink colour"></div>
       <div class="topbar-divider"></div>
-      <div class="topbar-meta" id="glyphCountMeta">42 glyphs</div>
+      <div class="topbar-meta" id="glyphCountMeta"></div>
       <div class="topbar-divider"></div>
       <a class="text-btn" href="poster.html" title="Turn this font into a poster with a liquid echo effect">Poster tool &rarr;</a>
+      <button class="text-btn" id="keysBtn" type="button" aria-haspopup="dialog" title="Keyboard shortcuts (?)">Keys</button>
       <button class="text-btn" id="aboutBtn" type="button" aria-haspopup="dialog" title="Author and terms of use">About</button>
     </header>
 
     <main class="workspace">
-      <aside class="editor-panel">
+      <aside class="editor-panel" aria-label="Glyph editor">
         <div class="panel-label">Glyph editor — <span id="letterBadge">A</span></div>
-        <div class="editor-canvas-wrap">
+        <div class="editor-canvas-wrap" id="editorWrap" tabindex="0" aria-label="Glyph canvas. Enter selects the first node, Tab and Shift Tab walk the nodes, arrow keys move the selected node, alt plus arrows resize it, Escape then Tab leaves the canvas.">
           <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
         </div>
-        <div class="readout" id="editorReadout">Click a node, then drag to move it — or drag its orange rim to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
+        <div class="zoom-row" role="group" aria-label="Canvas zoom">
+          <button class="mini-btn" id="btnZoomOut" type="button" aria-label="Zoom out">&minus;</button>
+          <span class="zoom-label" id="zoomLabel">100%</span>
+          <button class="mini-btn" id="btnZoomIn" type="button" aria-label="Zoom in">+</button>
+          <button class="mini-btn" id="btnFit" type="button" title="Fit the glyph in the canvas">Fit</button>
+        </div>
+        <div class="readout" id="editorReadout" aria-live="polite">Click a node, then drag to move it — or drag its orange rim to swell / pinch the stroke. Scroll to zoom, drag empty space to pan.</div>
+        <div class="global-warn" id="globalWarn" hidden>Global is on: a drag moves the node with the same number in every letter.</div>
 
         <div class="node-inspector" id="nodeInspector">
           <div class="node-field">
-            <label>X</label>
+            <label for="nodeX">X</label>
             <input type="number" id="nodeX" step="0.5" disabled />
           </div>
           <div class="node-field">
-            <label>Y</label>
+            <label for="nodeY">Y</label>
             <input type="number" id="nodeY" step="0.5" disabled />
           </div>
           <div class="node-field">
-            <label>R</label>
+            <label for="nodeR">R</label>
             <input type="number" id="nodeR" step="0.5" min="2" disabled />
           </div>
-          <button class="mini-btn" id="btnAddNode" title="Insert a new node next to this one, for finer control over the curve" disabled>+ Node</button>
-          <button class="mini-btn" id="btnDelNode" title="Remove this node" disabled>&minus; Node</button>
+          <button class="mini-btn" id="btnAddNode" type="button" title="Insert a new node next to this one, for finer control over the curve" disabled>+ Node</button>
+          <button class="mini-btn" id="btnDelNode" type="button" title="Remove this node (Delete)" disabled>&minus; Node</button>
         </div>
+
+        <div class="node-inspector metrics-row">
+          <div class="node-field">
+            <label for="glyphLsb">Left SB</label>
+            <input type="number" id="glyphLsb" step="0.5" title="Left sidebearing, glyph units" />
+          </div>
+          <div class="node-field">
+            <label for="glyphRsb">Right SB</label>
+            <input type="number" id="glyphRsb" step="0.5" title="Right sidebearing, glyph units" />
+          </div>
+          <button class="mini-btn" id="btnAutoMetrics" type="button" title="Drop this glyph's manual spacing and go back to the automatic value">Auto</button>
+        </div>
+
+        <div class="node-inspector metrics-row pair-row" role="group" aria-label="Kerning pair">
+          <div class="node-field pair-glyph">
+            <label for="pairLeft">Pair</label>
+            <input type="text" id="pairLeft" maxlength="6" value="A" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="node-field pair-glyph">
+            <label for="pairRight" class="visually-hidden">Second glyph</label>
+            <span class="pair-spacer" aria-hidden="true">&nbsp;</span>
+            <input type="text" id="pairRight" maxlength="6" value="V" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="node-field">
+            <label for="pairKern">Kern</label>
+            <input type="number" id="pairKern" step="0.5" title="Kerning for this pair, glyph units (negative = tighter)" />
+          </div>
+          <button class="mini-btn" id="btnPairAuto" type="button" title="Drop the manual value and use automatic kerning for this pair">Auto</button>
+        </div>
+        <div class="pair-preview" id="pairPreview" aria-hidden="true"></div>
 
         <div class="toggle-grid">
-          <div class="pill-btn" id="btnResetGlyph" title="Revert this glyph to its original nodes">Reset Glyph</div>
-          <div class="pill-btn" id="btnUndo" title="Undo last edit">Undo</div>
+          <button class="pill-btn" id="btnResetGlyph" type="button" title="Revert this glyph (or the selected mark) to its original nodes">Reset</button>
+          <button class="pill-btn" id="btnUndo" type="button" title="Undo (Ctrl/⌘ Z)">Undo</button>
+          <button class="pill-btn" id="btnRedo" type="button" title="Redo (Shift Ctrl/⌘ Z)">Redo</button>
         </div>
 
-        <div class="editor-hint">
-          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its orange rim to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. MELT controls how much neighbouring blobs fuse.
-        </div>
+        <section class="panel-section" aria-labelledby="diaTitle">
+          <div class="panel-label" id="diaTitle">Diacritics — all marks</div>
+          <div class="slider-group wide">
+            <label for="sldMarkScale">Mark size <b id="valMarkScale"></b></label>
+            <input type="range" id="sldMarkScale" min="0.6" max="1.5" step="0.01" />
+          </div>
+          <div class="slider-group wide">
+            <label for="sldMarkGap">Mark gap <b id="valMarkGap"></b></label>
+            <input type="range" id="sldMarkGap" min="0" max="20" step="0.5" />
+          </div>
+        </section>
+
+        <details class="editor-hint">
+          <summary>How editing works</summary>
+          Every node carries its own radius, so thickness varies along a stroke. Click a node to select it — drag to move, drag its orange rim to swell or pinch, or type exact X / Y / R above. Add nodes for finer detail on tight curves. Vietnamese letters are built from a base letter plus shared marks: select one and the brown mark nodes edit that mark everywhere it is used. MELT controls how much neighbouring blobs fuse.
+        </details>
       </aside>
 
-      <section class="specimen-panel">
+      <section class="specimen-panel" aria-label="Specimen">
         <div class="specimen-scroll" id="specimenScroll">
           <div id="testerList"></div>
           <div class="add-block-row">
-            <button class="mini-btn" id="btnAddBlock">+ Add preview block</button>
+            <button class="mini-btn" id="btnAddBlock" type="button">+ Add preview block</button>
+            <label class="visually-hidden" for="proofSelect">Add a proofing string</label>
+            <select id="proofSelect" class="proof-select">
+              <option value="">+ Proof string…</option>
+              <option value="spacing">Spacing — HAMBURGEFONTSIV</option>
+              <option value="kerning">Kerning — AV LT TA P.</option>
+              <option value="vietnamese">Vietnamese — ĂN ẤM ỞN ĐẸP</option>
+              <option value="pangram">Pangram + figures</option>
+              <option value="waterfall">Waterfall — 72 → 18px</option>
+            </select>
           </div>
           <div class="glyphset">
-            <div class="glyphset-title">Character set</div>
+            <div class="glyphset-title">Character set <span class="glyphset-legend"><span id="glyphsetCoverage"></span> · dot = edited</span></div>
             <div id="glyphSet"></div>
           </div>
         </div>
@@ -65,41 +135,56 @@
     </main>
 
     <footer class="control-bar">
-      <div class="slider-group">
-        <label>Mass <b id="valMass"></b></label>
-        <input type="range" id="sldMass" min="0.6" max="1.5" step="0.01" />
+      <div class="control-cluster" role="group" aria-label="Shape">
+        <div class="slider-group">
+          <label for="sldMass">Mass <b id="valMass"></b></label>
+          <input type="range" id="sldMass" min="0.6" max="1.5" step="0.01" />
+        </div>
+        <div class="slider-group">
+          <label for="sldMelt">Melt <b id="valMelt"></b></label>
+          <input type="range" id="sldMelt" min="0" max="40" step="1" />
+        </div>
+        <div class="slider-group">
+          <label for="sldTension">Tension <b id="valTension"></b></label>
+          <input type="range" id="sldTension" min="-12" max="8" step="0.5" />
+        </div>
+        <div class="slider-group">
+          <label for="sldWobble">Wobble <b id="valWobble"></b></label>
+          <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
+        </div>
+        <div class="slider-group">
+          <label for="sldSmooth">Smooth <b id="valSmooth"></b></label>
+          <input type="range" id="sldSmooth" min="0" max="4" step="1" />
+        </div>
       </div>
-      <div class="slider-group">
-        <label>Melt <b id="valMelt"></b></label>
-        <input type="range" id="sldMelt" min="0" max="40" step="1" />
-      </div>
-      <div class="slider-group">
-        <label>Tension <b id="valTension"></b></label>
-        <input type="range" id="sldTension" min="-12" max="8" step="0.5" />
-      </div>
-      <div class="slider-group">
-        <label>Wobble <b id="valWobble"></b></label>
-        <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
-      </div>
-      <div class="slider-group">
-        <label>Smooth <b id="valSmooth"></b></label>
-        <input type="range" id="sldSmooth" min="0" max="4" step="1" />
+
+      <div class="control-divider"></div>
+
+      <div class="control-cluster" role="group" aria-label="Spacing">
+        <div class="slider-group">
+          <label for="sldSpacing">Spacing <b id="valSpacing"></b></label>
+          <input type="range" id="sldSpacing" min="0" max="20" step="0.5" />
+        </div>
+        <div class="slider-group">
+          <label for="sldKern">Kerning <b id="valKern"></b></label>
+          <input type="range" id="sldKern" min="0" max="1" step="0.05" />
+        </div>
       </div>
 
       <div class="control-divider"></div>
 
       <div class="edit-mode-group">
-        <label>Edit mode</label>
+        <span class="group-label">Edit mode</span>
         <div class="edit-toggle-row">
-          <button class="edit-toggle" id="btnGlobalEdit" title="Apply node edits to every glyph sharing this node index">Global</button>
-          <button class="edit-toggle" id="btnMirror" title="Mirror node edits across the vertical axis">Mirror</button>
+          <button class="edit-toggle" id="btnGlobalEdit" type="button" title="Apply node edits to every glyph sharing this node index">Global</button>
+          <button class="edit-toggle" id="btnMirror" type="button" title="Mirror node edits across the vertical axis">Mirror</button>
         </div>
       </div>
 
       <div class="control-divider"></div>
 
       <div class="select-group">
-        <label>Flow state</label>
+        <label for="presetSelect">Flow state</label>
         <select id="presetSelect">
           <option value="liquid" selected>Liquid</option>
           <option value="mercury">Mercury</option>
@@ -111,21 +196,37 @@
       </div>
 
       <div class="select-group">
-        <label>Flow <b id="seedLabel" class="seed-label">#5</b></label>
-        <button class="text-btn reseed" id="btnReseed">Restir &#8635;</button>
+        <span class="group-label">Flow <b id="seedLabel" class="seed-label">#5</b></span>
+        <button class="text-btn reseed" id="btnReseed" type="button" title="New random wobble">Restir &#8635;</button>
       </div>
 
       <div class="control-spacer"></div>
 
       <div class="export-group">
-        <button class="export-btn secondary" id="btnExportSvg">SVG</button>
-        <button class="export-btn secondary" id="btnExportPng">PNG</button>
-        <button class="export-btn" id="btnExportOtf">Export OTF</button>
+        <button class="export-btn secondary" id="btnExportSvg" type="button" title="Every preview block as one vector specimen">SVG</button>
+        <button class="export-btn secondary" id="btnExportPng" type="button" title="Every preview block as a 2× image">PNG</button>
+        <button class="export-btn" id="btnExportOtf" type="button" title="Installable font: caps, lowercase mapping, Vietnamese, kerning">Export OTF</button>
       </div>
     </footer>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog class="about-dialog" id="keysDialog" aria-labelledby="keysTitle">
+    <form method="dialog"><button class="text-btn about-close" type="submit" aria-label="Close">&times;</button></form>
+    <div class="about-title" id="keysTitle">Keyboard shortcuts</div>
+    <dl class="about keys">
+      <dt>Ctrl/⌘ Z · Shift Ctrl/⌘ Z</dt><dd>Undo · redo</dd>
+      <dt>Ctrl/⌘ S · Ctrl/⌘ O</dt><dd>Save · open project file</dd>
+      <dt>[ · ]</dt><dd>Previous · next glyph</dd>
+      <dt>Enter · Tab (canvas focused)</dt><dd>First node · next node (Shift: previous)</dd>
+      <dt>Esc, then Tab</dt><dd>Deselect, leave the canvas</dd>
+      <dt>Arrows · Shift arrows</dt><dd>Move node 1 · 10 units</dd>
+      <dt>Alt arrows</dt><dd>Swell · pinch the node</dd>
+      <dt>Delete · Esc</dt><dd>Remove node · deselect</dd>
+      <dt>Ctrl/⌘ Enter</dt><dd>Finish editing preview text</dd>
+    </dl>
+  </dialog>
 
   <dialog class="about-dialog" id="aboutDialog" aria-labelledby="aboutTitle">
     <form method="dialog"><button class="text-btn about-close" type="submit" aria-label="Close">&times;</button></form>
@@ -144,10 +245,11 @@
   </dialog>
 
 <script>
-/* Native dialog, so the whole of it is the button plus showModal(). */
+/* Native dialogs, so each is the button plus showModal(). */
 (function () {
-  var btn = document.getElementById('aboutBtn');
-  var dlg = document.getElementById('aboutDialog');
-  if (btn && dlg) btn.addEventListener('click', function () { dlg.showModal(); });
+  [['aboutBtn', 'aboutDialog'], ['keysBtn', 'keysDialog']].forEach(function (p) {
+    var btn = document.getElementById(p[0]), dlg = document.getElementById(p[1]);
+    if (btn && dlg) btn.addEventListener('click', function () { dlg.showModal(); });
+  });
 })();
 </script>
