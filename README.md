@@ -43,97 +43,23 @@ automatic kerning.
   and the script that generates it (`python3 gen_glyphs_meta.py` rewrites both
   `glyphs_meta.json` and `glyphs_meta.js`).
 - `glyphs_meta.js` — the same glyph data as a `<script>`-loadable global
-  (`GLYPH_DATA`), for pages like `poster.html` that don't go through `bundle.py`.
+  (`GLYPH_DATA`), for pages that load it directly instead of through
+  `bundle.py` (Liquid.Poster keeps a copy).
 - `bundle.py` — assembles `index.html` from the source files above.
 - `jsdom_check.js` — headless DOM/interaction smoke test (`npm i jsdom`, then
   `node jsdom_check.js` after `python3 bundle.py`).
 
 ### Poster tool
 
-- `poster.html` / `poster-engine.js` / `poster.css` — a second, standalone
-  app ("Poster generator", linked from the topbar of both tools) that builds
-  posters from liquid contour type.
-
-  **Typeface** — either the built-in Liquid glyph set or an uploaded font
-  (`.ttf`/`.otf`/`.woff`, parsed with opentype.js). For the built-in set the
-  letterforms themselves are adjustable here: the Font tool's flow-state
-  presets plus Mass / Melt / Tension / Wobble / Flow / Drip feed `BlobEngine.glyphRings`,
-  so the whole alphabet can be reshaped without leaving the poster. Per-glyph
-  node editing lives in the Font tool, and its edits come across: when the
-  Font tool has saved a project in this browser, *Use my Font-tool glyphs*
-  swaps in your skeletons and marks (and *Match its flow state & accents*
-  adopts its shape settings too). Text is read as letter + accent clusters
-  through `glyph-compose.js`, so Vietnamese works in both title styles; an
-  uploaded font missing a precomposed letter has it rebuilt from base + mark
-  glyphs.
-
-  **Big title** — any number of independent rows, each with its own text,
-  tracking, transform and *style*. Each row is rasterized to its own mask,
-  which is blurred, thresholded, converted to a signed distance field and
-  contoured with `BlobEngine.traceField` — the same marching-squares pipeline the
-  Font tool uses per glyph, just fed a raster-derived field instead of an
-  analytic one. The blur + threshold (*Merge*) is what fuses the letterforms
-  into a single molten mass; floating accents are drawn after it, so they stay
-  separate from their letters.
-
-  Each row is transformed directly on the canvas: drag the box to move, corner
-  handles to resize, the stem handle above it to rotate (hold shift to snap to
-  15°). Arrow keys nudge, `[` / `]` rotate.
-
-  Rows are traced independently, which is what lets each one carry its own
-  effect and fill mode — a shared trace could not be split back apart per row.
-  They therefore overlap rather than melting into one another.
-
-  **Title style (per row)** — `Melt` fuses the glyph silhouettes (blocky,
-  poster-weight). `Ink stroke` instead draws the built-in font's node chains as
-  one thin variable-width pen stroke — the glyph data is a skeleton with
-  per-node radii, so this gives a real modulated stroke that swells where
-  strokes cross rather than a melted silhouette. A ribbon along the baseline
-  joins the letters into a single written mark, Slant leans it, Pen sets the
-  thickness, and Pocket floods small enclosed rings solid (the inked wedges
-  where the stroke doubles back). Ink stroke needs the skeleton, so an uploaded font —
-  which has outlines only — falls back to Melt geometry plus the ribbon, slant
-  and pockets.
-
-  **Line effect (per row)** — the traced mass is contoured from a true signed
-  distance field (exact Felzenszwalb EDT), so "the same shape offset inward by
-  N pixels" is a first-class operation and the three treatments are just
-  different lists of offsets:
-
-  - `Solid` — one clean contour.
-  - `Rough` — a second line just inside the first, displaced by
-    high-frequency noise: a shivered double-stroke band. Gap / Shake.
-  - `Contour` — nested lines stepping inward at even spacing, topographic-map
-    style. Lines / Step.
-
-  Lines deeper than the thickest part of the mass are skipped (a contour with
-  nothing to trace shatters into noise fragments and the O(n^2) chain repair
-  stalls), and noise eases off with depth for the same reason.
-
-  **Outline / Filled (per row)** — `Filled` uses even-odd across every line the
-  effect produced, so Solid reads as a solid mass while Contour reads as
-  concentric bands.
-
-  **Undo / persistence** — the composition autosaves to this browser
-  (`liquidfont.poster.v1`, validated on load); Ctrl/⌘Z / Shift+Ctrl/⌘Z undo
-  and redo every gesture, Reset included.
-
-  **Small text** — any number of independent blocks, each with its own
-  Google Mono face, size, leading, alignment, position and colour, drawn
-  crisply on top and untouched by the melt. Block colour is independent of the
-  title ink (with a "Match ink" shortcut to re-link it).
-
-  Positions are stored as percentages, so changing the poster size rescales the
-  composition rather than scattering it. The stage has zoom (slider, +/−, Fit,
-  100%, ⌘/Ctrl+scroll) and drag-to-pan. Unselected row/text cards collapse to
-  just their identity, so the sidebar stays scannable as a poster grows.
-
-  Exports PNG at 1–3× and SVG (vector outline + each Google font inlined as a
-  base64 `@font-face` subset containing only the glyphs actually used).
+The poster tool now lives on its own as **Liquid.Poster**, at
+https://markdo27.github.io/liquid-poster/ (source in the
+[markdo27.github.io](https://github.com/markdo27/markdo27.github.io) repo,
+`liquid-poster/`). It shares this tool's origin, so it can still draw with
+the letters you sculpt here: it reads the project this tool autosaves.
 
 ## Design language
 
-Both tools are strictly black and white, the same as the type they make. No
+The tool is strictly black and white, the same as the type it makes. No
 hue carries meaning; emphasis comes from inversion and motion (tokens at the
 top of `styles.css`, all of it switched off under *reduce motion*):
 
@@ -147,13 +73,8 @@ top of `styles.css`, all of it switched off under *reduce motion*):
   label included. The fill stays full while an export is pouring.
 - **Drip**: the full stop in the wordmark now and then swells, drops a bead
   and settles.
-- **March / breathe**: things to drag or feed say so by moving: the selected
-  node's radius ring marches, and a poster waiting for its font file has a
-  breathing drop zone.
-- On the poster canvas the selection box is white dashes on a black line, so it
-  reads on any poster colour. The palette presets are monochrome (Paper,
-  Noir, Print, Graphite, Ash, Smoke, plus grey and paper ramps). Any other
-  colour is one custom pick away.
+- **March**: things to drag say so by moving: the selected node's radius
+  ring marches.
 
 ## Rebuilding
 
@@ -296,8 +217,9 @@ Opened files are validated into a staging copy (every value clamped to its
 slider's range) and only applied if the whole file passes. Undo covers node
 edits, sidebearings, kerning pairs, shape/spacing/accent settings, presets and
 preview blocks.
-The saved project includes every skeleton with your edits applied, which the
-Poster tool reads so posters use your glyphs.
+The saved project includes every skeleton with your edits applied, which
+[Liquid.Poster](https://markdo27.github.io/liquid-poster/) reads so posters use
+your glyphs.
 
 ## Export
 
