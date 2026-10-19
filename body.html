@@ -153,6 +153,14 @@
           <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
         </div>
         <div class="slider-group">
+          <label for="sldFlow" title="How much the surface flows: a sliding contour, beads and necks along the strokes">Flow <b id="valFlow"></b></label>
+          <input type="range" id="sldFlow" min="0" max="1" step="0.05" />
+        </div>
+        <div class="slider-group">
+          <label for="sldDrip" title="A few seeded drips from free stem feet and bar tips (0 = none)">Drip <b id="valDrip"></b></label>
+          <input type="range" id="sldDrip" min="0" max="1" step="0.05" />
+        </div>
+        <div class="slider-group">
           <label for="sldSmooth">Smooth <b id="valSmooth"></b></label>
           <input type="range" id="sldSmooth" min="0" max="4" step="1" />
         </div>
@@ -224,7 +232,10 @@
       <dt>Arrows · Shift arrows</dt><dd>Move node 1 · 10 units</dd>
       <dt>Alt arrows</dt><dd>Swell · pinch the node</dd>
       <dt>Delete · Esc</dt><dd>Remove node · deselect</dd>
-      <dt>Ctrl/⌘ Enter</dt><dd>Finish editing preview text</dd>
+      <dt>Click a preview · Tab to it</dt><dd>Type straight into it — Enter: new line</dd>
+      <dt>Arrows · Home / End (preview)</dt><dd>Letter by letter, line by line as drawn (Shift: select)</dd>
+      <dt>Esc · Ctrl/⌘ Enter (preview)</dt><dd>Leave the text; the shortcuts above work again — Enter goes back in</dd>
+      <dt>Right-click (preview)</dt><dd>Cut · Copy · Paste the selection</dd>
     </dl>
   </dialog>
 

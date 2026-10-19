@@ -13,7 +13,10 @@
     bubble:  { mass: 0.94, melt:  7, tension: -7, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
     goo:     { mass: 1.10, melt: 20, tension:  0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
   };
-  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
+  // flow and drip have sliders; warp, neck, sag, dripForm and stretch are the
+  // Flow preset's own liquid physics and travel with the project
+  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res',
+    'flow', 'warp', 'neck', 'sag', 'drip', 'dripForm', 'stretch'];
 
   // preview inks, a tonal ramp; black flips the previews to paper
   var PALETTE = ['#ffffff', '#c4c4c4', '#8a8a8a', '#000000'];
@@ -110,7 +113,8 @@
   }
   function shapeKey() {
     var s = state, L = GC.LAYOUT;
-    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res, s.seed, s.draft ? 'd' : '',
+    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res,
+      s.flow, s.warp, s.neck, s.sag, s.drip, s.dripForm, s.stretch, s.seed, s.draft ? 'd' : '',
       L.scale, L.gapTop, L.gapStack, L.gapBottom].join('|');
   }
   function verOf(L) { return (isMark(L) ? 0 : globalVer) + '.' + letterVer[L]; }
@@ -125,18 +129,35 @@
     var t = Object.prototype.hasOwnProperty.call(TUNE, key) && TUNE[key];
     return state.melt * (t && t.melt > 0 ? t.melt : 1);
   }
-  function traceChains(chains, key, tag) {
-    var k = 't|' + key + '|' + tag;
+  // Drips hang only from letters and figures: never from a mark, a dot or
+  // punctuation, nor from a letter carrying a mark below it (noDrip), whose
+  // dot or cedilla would land in the drip.
+  function dripsFor(key, noDrip) {
+    return noDrip || !(ALNUM.test(key) || OWN_CAPS.indexOf(key) >= 0) ? 0 : state.drip;
+  }
+  // Each traced ring set remembers its drip-free foot (the ink bottom with
+  // drips left out), so drips never move the measured baseline.
+  var FOOT = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function footOf(rings) {
+    var f = FOOT && FOOT.get(rings), b = GC.bbox(rings);
+    return f != null ? f : (b ? b[3] : null);
+  }
+  function traceChains(chains, key, tag, noDrip) {
+    var k = 't|' + key + '|' + tag + (noDrip ? '|nd' : '');
     if (cache[k]) return cache[k];
     var r;
     try {
-      r = BlobEngine.glyphRings(GC.markChains(key, chains), GC.traceOpts(key, {
+      var t = BlobEngine.glyphTrace(GC.markChains(key, chains), GC.traceOpts(key, {
         mass: state.mass, melt: meltFor(key), tension: state.tension, wobble: state.wobble,
         grain: state.grain, smooth: state.smooth, simplify: 0.3,
+        flow: state.flow, warp: state.warp, neck: state.neck, sag: state.sag,
+        drip: dripsFor(key, noDrip), dripForm: state.dripForm, stretch: state.stretch,
         // while a slider is being dragged, trace coarser and refine on release
         res: state.draft ? state.res * 1.7 : state.res,
         seed: state.seed + key.charCodeAt(0) * 13,
       }));
+      r = t.rings;
+      if (FOOT && t.foot != null) FOOT.set(r, t.foot);
     } catch (e) { console.error('glyph failed', key, e); r = []; }
     return remember(k, r);
   }
@@ -146,9 +167,13 @@
     var tag = shapeKey() + '@' + [p.base].concat(p.fused, p.top, p.bottom).map(verOf).join(',');
     var k = 'c|' + L + '|' + tag;
     if (cache[k]) return cache[k];
+    var below = p.bottom.length > 0;   // a dot below / cedilla: the base must not drip into it
     return remember(k, GC.compose(L, {
-      rings: ringsOf, chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
-      trace: function (ch, key) { return traceChains(ch, key, tag); },
+      rings: function (key) {
+        return below && key === p.base && FLAT[key] ? traceChains(chainsOf(key), key, shapeKey() + '@' + verOf(key), true) : ringsOf(key);
+      },
+      chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
+      trace: function (ch, key) { return traceChains(ch, key, tag, below); },
     }, hasKey));
   }
   function ringsOf(L) {
@@ -192,7 +217,10 @@
     }
     return d;
   }
-  function gid(L) { return 'g' + Array.from(L).map(function (c) { return c.codePointAt(0).toString(16); }).join('_'); }
+  var GIDS = Object.create(null);
+  function gid(L) {
+    return GIDS[L] || (GIDS[L] = 'g' + Array.from(L).map(function (c) { return c.codePointAt(0).toString(16); }).join('_'));
+  }
 
   // ---------------------------------------------------------------- metrics
   // Baseline and cap height are measured from the rendered ink, not taken
@@ -202,7 +230,7 @@
   function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
   function measureMetrics() {
     var bot = [], top = [];
-    Array.from('HIELNMKTFZ').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) bot.push(b[3]); });
+    Array.from('HIELNMKTFZ').forEach(function (L) { var f = FLAT[L] && footOf(ringsOf(L)); if (f != null && f !== false) bot.push(f); });
     Array.from('HIETFZBDPRKL').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) top.push(b[1]); });
     MET.base = bot.length ? median(bot) : GH;
     MET.cap = top.length ? median(top) : 0;
@@ -279,7 +307,8 @@
     var lsb = sp * (1 - k * dl), rsb = sp * (1 - k * dr);
     var adj = own(state.metrics, L) && state.metrics[L];
     if (adj) { lsb += adj[0]; rsb += adj[1]; }
-    return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi });
+    var full = comp ? GC.bbox(rings) : bb;   // top: how high its ink reaches, marks included
+    return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi, top: full ? full[1] : MET.cap });
   }
   // Kerning is only about how two shapes meet; how much white one side
   // carries on its own is the sidebearings' job (white area adds up row by
@@ -349,9 +378,30 @@
   }
 
   // ------------------------------------------------------------------ state
+  // a block's id is stable for the session: undo snapshots carry it, so a
+  // block that comes back is the same block (and keeps its caret) — never
+  // "whichever block now sits in that position"
   var uid = 0;
-  function block(text, size, lh, tr, paper) {
-    return { id: ++uid, text: text, size: size, lh: lh, tr: tr, paper: !!paper, editing: false };
+  // Preview caps, one set for everything: typing stops at BLOCK_MAX a block
+  // and TEXT_BUDGET in all; Add block and the proofs may put their short
+  // fixed strings on top, up to FIXED_SLACK more, and at most MAX_BLOCKS
+  // blocks. A project file (and the autosave) keeps exactly that much, so
+  // whatever you can make here comes back whole after a reload.
+  var BLOCK_MAX = 5000, TEXT_BUDGET = 20000, FIXED_SLACK = 2000, MAX_BLOCKS = 40;
+  function previewChars(but) {
+    var n = 0;
+    state.blocks.forEach(function (x) { if (x !== but) n += x.text.length; });
+    return n;
+  }
+  // room for n more blocks holding `chars` characters of fixed text
+  function roomFor(n, chars) {
+    if (state.blocks.length + n > MAX_BLOCKS) { toast('That makes more than ' + MAX_BLOCKS + ' preview blocks — remove one first', 3200); return false; }
+    if (previewChars() + chars > TEXT_BUDGET + FIXED_SLACK) { toast('Preview text is full — shorten a block first', 3200); return false; }
+    return true;
+  }
+  function block(text, size, lh, tr, paper, id) {
+    if (id > uid) uid = id;
+    return { id: id > 0 ? id : ++uid, text: text, size: size, lh: lh, tr: tr, paper: !!paper };
   }
   function defaultBlocks() {
     return [
@@ -509,27 +559,228 @@
     return svg;
   }
 
+  // ------------------------------------------------------------ text layout
+  // One layout serves the live previews (glyphs, caret, selection) and the
+  // SVG / PNG specimen, so what is typed, what is shown and what is exported
+  // always agree. Text is split into clusters — a base character with its
+  // combining marks — which are also the caret's steps.
+  // Whitespace: every space or tab is one word space and nothing collapses
+  // (two spaces show as two); '\n' is a hard line break. Lines wrap between
+  // words; the space where a line wraps hangs past the right edge (it takes
+  // no room) and the next line starts with the next word. More spaces than
+  // that wrap with it, as CSS break-spaces does: a run of spaces typed at
+  // the edge, or a line of nothing but spaces, flows on to the next line,
+  // so every space still moves the caret. A word wider than
+  // the column shrinks the block to fit (down to 8px); one still too wide
+  // at that size breaks between letters. Tracking goes between neighbouring
+  // glyphs of a word, kerning between two drawn ones; a character the font
+  // can't draw yet is a dashed box (one box for a whole emoji, flag or ZWJ
+  // sequence, which is also one caret step).
+  var TOKEN_RE = /\n|[^\S\n]|\P{M}\p{M}*|\p{M}+/gu, NOTDEF_EM = 0.42;
+  var SEG = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  // text the mark-based split can get wrong: ZWJ, astral planes, scripts with conjuncts
+  var COMPLEX_RE = /[\u200c\u200d]|[^\u0000-\u024f\u0300-\u036f\u1e00-\u1eff\u2010-\u205f\u20a0-\u20bf]/;
+  // start offsets of the grapheme clusters, or null when they are the
+  // mark-based clusters anyway
+  function graphemeStarts(text) {
+    if (!SEG || !COMPLEX_RE.test(text)) return null;
+    var out = Object.create(null);
+    for (var seg of SEG.segment(text)) out[seg.index] = 1;
+    return out;
+  }
+  function newLine() { return { items: [], glyphs: [], w: 0, br: null }; }
+  var CLUSTERS = Object.create(null), nClusters = 0;
+  function cacheClusters(s) {
+    if (++nClusters > 4000) { CLUSTERS = Object.create(null); nClusters = 0; }
+    return (CLUSTERS[s] = GC.clusters(s));
+  }
+  function layoutText(text, size, tr, maxW, fit) {
+    var toks = [], m, i, j, t, wd = null, widest = 0, em = MET.em;
+    // pass 1: tokens, and every word measured in em (size-free, so a fit is exact)
+    var gb = graphemeStarts(text);
+    TOKEN_RE.lastIndex = 0;
+    while ((m = TOKEN_RE.exec(text))) {
+      var s = m[0], kind = s === '\n' ? 'br' : /^\s$/.test(s) ? 'sp' : 'g';
+      if (gb && kind === 'g' && !gb[m.index] && t && t.t === 'g' && t.o1 === m.index) t.o1 += s.length;   // the rest of a grapheme
+      else {
+        t = { t: kind, o0: m.index, o1: m.index + s.length, x0: 0, x1: 0 };
+        toks.push(t);
+        if (kind !== 'g') { wd = null; continue; }
+        if (!wd) wd = { i0: toks.length - 1, w: 0, prev: null, n: 0 };
+        t.word = wd; t.gl = [];
+      }
+      var Ls = CLUSTERS[s] || cacheClusters(s);   // usually one; ß gives S S
+      for (j = 0; j < Ls.length; j++) {
+        var L = Ls[j], draw = canDraw(L), g;
+        if (!draw && t.gl.length && t.gl[t.gl.length - 1].notdef) continue;   // one box per grapheme
+        if (wd.n) wd.w += tr + (draw && wd.prev ? kernOf(wd.prev, L) / em : 0);
+        g = draw ? { L: L, e: wd.w, s: spacingOf(L) } : { notdef: true, e: wd.w };
+        wd.w += draw ? g.s.adv / em : NOTDEF_EM;
+        wd.prev = draw ? L : null; wd.n++;
+        t.gl.push(g);
+      }
+      t.e1 = wd.w;
+      if (wd.w > widest) widest = wd.w;
+    }
+    // on a narrow column a big word can be wider than the block: shrink the
+    // rendering (not the setting) so the longest word still fits
+    if (fit && maxW > 0 && widest * size > maxW) size = Math.max(8, Math.floor(maxW / widest));
+    // pass 2: place in px, wrapping between words
+    var k = size / em, spW = (wordEm() + tr) * size, lines = [], line = newLine(), x = 0, hasWord = false, wx = 0;
+    for (i = 0; i < toks.length; i++) {
+      t = toks[i];
+      if (t.t === 'br') {
+        t.x0 = t.x1 = x; line.items.push(t); line.br = t;
+        lines.push(line); line = newLine(); x = 0; hasWord = false;
+        continue;
+      }
+      if (t.t === 'sp') {
+        // a space that would start past the edge goes to the next line
+        if (x >= maxW && line.items.length) { lines.push(line); line = newLine(); x = 0; hasWord = false; }
+        t.x0 = x; x += spW; t.x1 = x; line.items.push(t); continue;
+      }
+      wd = t.word;
+      if (wd.i0 === i) {
+        // a word that doesn't fit after what is on the line (words, or the
+        // spaces that open it) starts the next one
+        if ((hasWord || x > 0) && x + wd.w * size > maxW) { lines.push(line); line = newLine(); x = 0; }
+        hasWord = true; wx = x;
+        wd.brk = wd.w * size > maxW;   // too wide even at the fitted size: breaks between letters
+      } else if (wd.brk && wx + t.e1 * size > maxW && line.glyphs.length) {
+        lines.push(line); line = newLine(); wx = -t.gl[0].e * size;
+      }
+      x = wx + (wd.brk ? t.e1 : wd.w) * size; line.w = x;
+      for (j = 0; j < t.gl.length; j++) {
+        var q = t.gl[j], gx = wx + q.e * size;
+        line.glyphs.push(q.notdef ? { notdef: true, x: gx, w: NOTDEF_EM * size } : { L: q.L, x: gx, s: q.s });
+      }
+      t.x0 = wx + t.gl[0].e * size; t.x1 = wx + t.e1 * size;
+      line.items.push(t);
+    }
+    lines.push(line);
+    // caret stops: every cluster boundary, each on exactly one line, at the
+    // middle of the kerning/tracking gap between its two neighbours
+    var pos = new Array(text.length + 1), stops = [];
+    for (i = 0; i < lines.length; i++) {
+      var ln = lines[i], it = ln.items;
+      ln.stops = [];
+      for (j = 0; j < it.length; j++) ln.stops.push([it[j].o0, j ? (it[j - 1].x1 + it[j].x0) / 2 : it[j].x0]);
+      ln.end = ln.br ? ln.br.x0 : it.length ? it[it.length - 1].x1 : 0;
+      if (i === lines.length - 1) ln.stops.push([text.length, ln.end]);
+      ln.o0 = ln.stops[0][0];
+      for (j = 0; j < ln.stops.length; j++) { pos[ln.stops[j][0]] = [i, ln.stops[j][1]]; stops.push(ln.stops[j][0]); }
+    }
+    for (i = 0; i < lines.length; i++) lines[i].o1 = i + 1 < lines.length ? lines[i + 1].o0 : text.length;
+    return { text: text, size: size, k: k, maxW: maxW, lines: lines, toks: toks, stops: stops, pos: pos };
+  }
+  // index of the last entry <= o in an ascending list (0 when none is)
+  function lowerIdx(arr, o, key) {
+    var lo = 0, hi = arr.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi + 1) >> 1, v = key ? arr[mid][key] : arr[mid];
+      if (v <= o) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
   // --------------------------------------------------------- tester blocks
   var resizeT = null;
   window.addEventListener('resize', function () {
     clearTimeout(resizeT);
-    resizeT = setTimeout(repaintAllTesters, 160);   // long words re-fit the column
+    resizeT = setTimeout(function () {
+      // back from the phone layout (where the page itself scrolls) to the
+      // desktop one (where it can't): a page scroll left over would hide the app
+      var se = document.scrollingElement;
+      if (se && se.scrollTop && getComputedStyle(document.documentElement).overflowY === 'hidden') se.scrollTop = 0;
+      repaintAllTesters();   // lines re-wrap to the new column
+    }, 160);
   });
-  function renderTesters(focusBlock) {
+  var activeEd = null;   // the preview whose text has focus
+  // The list is reconciled by block, not rebuilt: a block that is still
+  // there keeps its DOM (and, if you are typing in it, its focus), new
+  // blocks are built, removed ones dropped. Nothing ever goes by position,
+  // so an undo that puts a block back can't hand your caret to its
+  // neighbour.
+  function renderTesters(focusBlock, mode) {
     var scroller = $('specimenScroll'), keep = scroller.scrollTop;
-    testerList.innerHTML = '';
-    state.blocks.forEach(function (b) { testerList.appendChild(buildTester(b)); });
+    // the textarea still shows the text from before this render (an undo
+    // may already have changed the block), so that is what the caret is in
+    var was = activeEd && activeEd.root.parentNode === testerList ? activeEd : null, wasSel = null, wasText = '';
+    if (was) { wasText = was.ta.value; wasSel = [was.ta.selectionStart, was.ta.selectionEnd, was.ta.selectionDirection]; }
+    var old = {}, kids = Array.prototype.slice.call(testerList.children);
+    kids.forEach(function (r) { if (r.liquidEd) old[r.liquidEd.b.id] = r; });
+    var next = state.blocks.map(function (b) {
+      var r = old[b.id];
+      if (r && r.liquidEd.b === b) { delete old[b.id]; r.liquidSync(); return r; }
+      return buildTester(b);
+    });
+    // drop what is gone first, so the blocks that stay are never moved
+    // (moving the focused one would blur it)
+    kids.forEach(function (r) { if (next.indexOf(r) < 0) testerList.removeChild(r); });
+    next.forEach(function (r, i) { if (testerList.children[i] !== r) testerList.insertBefore(r, testerList.children[i] || null); });
+    var landing = null, lost = false;
+    if (was && was.root.parentNode !== testerList) {
+      // the block you were typing in went away (an undo took it back): focus
+      // lands on the nearest block that is still there — the block itself,
+      // not its text, so the next key edits nothing — and never on <body>,
+      // where the keyboard would lose its place
+      var at = kids.indexOf(was.root);
+      for (var d = 1; !landing && d < kids.length; d++) {
+        [kids[at + d], kids[at - d]].forEach(function (r) { if (!landing && r && r.parentNode === testerList) landing = r; });
+      }
+      activeEd = null; was = null; lost = true;
+    }
     if (!state.blocks.length) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
       empty.textContent = 'No preview blocks. Add one below to type with your font.';
       testerList.appendChild(empty);
     }
+    labelTesters();
+    repaintAllTesters();
     scroller.scrollTop = keep;   // rebuilding the list must not jump the view
+    var el, ed;
     if (focusBlock) {
-      var i = state.blocks.indexOf(focusBlock), el = testerList.children[i];
-      if (el) { el.scrollIntoView({ block: 'nearest' }); var t = el.querySelector('.tester-text'); if (t) t.focus({ preventScroll: true }); }
+      el = testerList.children[state.blocks.indexOf(focusBlock)];
+      if (!el) return;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+      ed = el.liquidEd;
+      if (mode === 'type' && ed) ed.focusAt(0, ed.ta.value.length);   // a new block: typing replaces its text
+      else { var del = el.querySelector('.tester-del'); if (del) del.focus({ preventScroll: true }); }
+    } else if (was) {   // still the same block and element: keep (or re-place) its caret
+      ed = was;
+      if (ed.b.text === wasText) ed.focusAt(wasSel[0], wasSel[1], wasSel[2]);
+      else { var c = changedEnd(wasText, ed.b.text); ed.focusAt(c, c); }
+    } else if (lost) {   // (no block left: the Add block button)
+      (landing || $('btnAddBlock')).focus({ preventScroll: true });
     }
+  }
+  // each preview's textarea gets its own name, so a screen reader can tell
+  // the blocks apart
+  function labelTesters() {
+    var n = state.blocks.length;
+    Array.prototype.forEach.call(testerList.children, function (r, i) {
+      if (r.liquidEd) r.liquidEd.ta.setAttribute('aria-label', 'Preview text ' + (i + 1) + ' of ' + n + ', ' + Math.round(r.liquidEd.b.size) + ' px');
+    });
+  }
+  function edOf(b) {
+    for (var c = testerList.firstChild; c; c = c.nextSibling) if (c.liquidEd && c.liquidEd.b === b) return c.liquidEd;
+    return null;
+  }
+  // new text for one block from outside its textarea (undo / redo)
+  function setBlockText(b, text) {
+    var ed = edOf(b), was = b.text;
+    b.text = text;
+    if (!ed) return;
+    ed.paint();
+    if (ed === activeEd) { var c = changedEnd(was, text); ed.focusAt(c, c); }
+  }
+  // where an edit ended: the end of what differs between two texts
+  function changedEnd(a, b) {
+    var p = 0, n = Math.min(a.length, b.length), q = 0;
+    while (p < n && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+    while (q < n - p && a.charCodeAt(a.length - 1 - q) === b.charCodeAt(b.length - 1 - q)) q++;
+    return b.length - q;
   }
 
   function ctrl(label, min, max, step, val, fmt, onInput) {
@@ -552,14 +803,15 @@
     });
     r.addEventListener('change', function () { armed = false; markDirty(); });
     wrap.appendChild(t); wrap.appendChild(b); wrap.appendChild(r);
+    wrap.liquidSet = function (v) { r.value = v; b.textContent = fmt(v); };   // an undo put a value back
     return wrap;
   }
 
   function buildTester(b) {
     var root = document.createElement('div');
     // black ink would vanish on the black specimen, so it prints on paper
-    var onPaper = b.paper || state.ink === '#000000';
-    root.className = 'tester' + (onPaper ? ' paper' : '');
+    root.className = 'tester';
+    root.tabIndex = -1;   // where Esc leaves you: Tab then goes to this block's controls, Enter back into its text
 
     var head = document.createElement('div');
     head.className = 'tester-head';
@@ -570,36 +822,38 @@
     name.dataset.role = 'name';
     head.appendChild(name);
 
-    head.appendChild(ctrl('Size', 10, 480, 1, b.size, function (v) { return Math.round(v) + 'px'; },
-      function (v) { b.size = v; paintText(root, b); }));
-    head.appendChild(ctrl('Leading', 70, 220, 1, b.lh, function (v) { return Math.round(v) + '%'; },
-      function (v) { b.lh = v; paintText(root, b); }));
-    head.appendChild(ctrl('Tracking', -0.06, 0.4, 0.005, b.tr, function (v) { return v.toFixed(3) + 'em'; },
-      function (v) { b.tr = v; paintText(root, b); }));
+    var cSize = ctrl('Size', 10, 480, 1, b.size, function (v) { return Math.round(v) + 'px'; },
+      function (v) { b.size = v; paintText(root, b); labelTesters(); });
+    var cLh = ctrl('Leading', 70, 220, 1, b.lh, function (v) { return Math.round(v) + '%'; },
+      function (v) { b.lh = v; paintText(root, b); });
+    var cTr = ctrl('Tracking', -0.06, 0.4, 0.005, b.tr, function (v) { return v.toFixed(3) + 'em'; },
+      function (v) { b.tr = v; paintText(root, b); });
+    head.appendChild(cSize); head.appendChild(cLh); head.appendChild(cTr);
 
     var sp = document.createElement('div'); sp.className = 'tester-spacer';
     head.appendChild(sp);
 
     var inv = document.createElement('button');
     inv.type = 'button';
-    inv.className = 'mini-btn' + (b.paper ? ' on' : '');
-    inv.textContent = b.paper ? 'Paper' : 'Ink';
-    inv.setAttribute('aria-pressed', String(b.paper));
     inv.title = 'Switch between ink on black and black on paper';
+    function syncPaper() {
+      root.classList.toggle('paper', b.paper || state.ink === '#000000');
+      inv.className = 'mini-btn' + (b.paper ? ' on' : '');
+      inv.textContent = b.paper ? 'Paper' : 'Ink';
+      inv.setAttribute('aria-pressed', String(b.paper));
+    }
+    syncPaper();
     inv.addEventListener('click', function () {
       pushUndo();
       b.paper = !b.paper;
-      root.classList.toggle('paper', b.paper);
-      inv.classList.toggle('on', b.paper);
-      inv.textContent = b.paper ? 'Paper' : 'Ink';
-      inv.setAttribute('aria-pressed', String(b.paper));
+      syncPaper();
       paintText(root, b); markDirty();
     });
     head.appendChild(inv);
 
     var del = document.createElement('button');
     del.type = 'button';
-    del.className = 'mini-btn';
+    del.className = 'mini-btn tester-del';
     del.textContent = '×';
     del.title = 'Remove this block';
     del.setAttribute('aria-label', 'Remove this preview block');
@@ -617,118 +871,601 @@
     var body = document.createElement('div');
     body.className = 'tester-body';
     root.appendChild(body);
-
-    paintText(root, b);
+    makeEditor(root, body, b);   // painted once it is in the document and has a width
+    // a kept block picks up what changed around it (undo, font name, ink);
+    // its text follows in the repaint
+    root.liquidSync = function () {
+      name.textContent = state.fontName;
+      cSize.liquidSet(b.size); cLh.liquidSet(b.lh); cTr.liquidSet(b.tr);
+      syncPaper();
+    };
     return root;
   }
+  // re-layout one block (size, leading, tracking, ink changed)
+  function paintText(root) {
+    var ed = root.liquidEd;
+    if (ed) ed.paint(ed.surface.clientWidth);
+  }
 
-  var lastMissing = '';
-  function paintText(root, b) {
-    var body = root.querySelector('.tester-body');
-    body.innerHTML = '';
+  // ------------------------------------------------------ live preview text
+  // Every preview is typed into directly. The glyphs are one SVG of <use>s
+  // of the shared defs, laid out by layoutText; the keys go to an invisible
+  // native <textarea> parked at the caret, so IME composition (Telex, VNI,
+  // macOS Vietnamese, dead keys, mobile keyboards), paste, the clipboard and
+  // screen readers work as in any text field, and the IME's candidate window
+  // opens where you type. Caret, selection and the arrow keys follow the
+  // drawn layout cluster by cluster: an accented letter is one step, and the
+  // caret never lands between a letter and its marks.
+  //
+  // Undo is the app's, never the textarea's: each typing burst (the first
+  // edit after focusing, after a pause or after moving the caret; each paste
+  // or cut) is one step on the same stack as glyph edits, and Ctrl/⌘Z or
+  // Edit › Undo in a preview goes to it.
+  var IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+  var PLACEHOLDER = 'Type here', BURST_MS = 1000;
+  function inkOf(b) { return b.paper || state.ink === '#000000' ? '#000' : state.ink; }
+  // Selection and placeholder colours, worked out from the ink and the
+  // ground with the WCAG contrast formula (not a fixed tint, which faded to
+  // ~1.3:1 on the grey ink): the selection stands >= 3:1 off the ground and
+  // the ink >= 3:1 off the selection — on a grey ink that can only be a
+  // light selection under the letters — and the placeholder >= 3:1 off the
+  // ground. Colours are mixed the way the browser blends them (in sRGB).
+  var MIN_CONTRAST = 3.2;   // 3:1, with a margin for rounding
+  function rgbOf(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) h = h.replace(/./g, '$&$&');
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lumOf(c) {
+    var f = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  }
+  function contrastOf(a, b) { var x = lumOf(a), y = lumOf(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mixOf(a, b, t) { return a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); }); }
+  function inkTones(ink, ground) {
+    var I = rgbOf(ink), G = rgbOf(ground), far = lumOf(G) < 0.5 ? [255, 255, 255] : [0, 0, 0], t, best = null, bestScore = -1;
+    for (t = 0.05; t <= 1.0001; t += 0.01) {   // selection: the nearest-to-ground colour that passes both
+      var S = mixOf(G, far, t), score = Math.min(contrastOf(S, G), contrastOf(I, S));
+      if (score >= MIN_CONTRAST) { best = S; break; }
+      if (score > bestScore) { bestScore = score; best = S; }
+    }
+    var ph = 1;
+    for (t = 0.2; t <= 1.0001; t += 0.01) if (contrastOf(mixOf(G, I, t), G) >= MIN_CONTRAST) { ph = t; break; }
+    return { sel: 'rgb(' + best.join(',') + ')', ph: Math.min(1, ph).toFixed(2) };
+  }
+  // Room above the first line for the font's ascender (ASC_EM: its tallest
+  // stacked Vietnamese capital), whatever the text — the way a line box
+  // keeps a font's ascent, and the way the export lays a block out. Room
+  // that came and went with the text made the block jump down at the first
+  // accent typed, and back up on leaving it.
+  function headroomOf(size, L, capH) { return Math.max(0, (ASC_EM + 0.02) * size - (L + capH) / 2); }
+  document.addEventListener('selectionchange', function () { if (activeEd) activeEd.syncSel(); });
 
-    if (b.editing) {
-      var ta = document.createElement('textarea');
-      ta.className = 'tester-edit';
-      ta.value = b.text;
-      ta.setAttribute('aria-label', 'Preview text');
-      body.appendChild(ta);
-      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
-      var commit = function () {
-        if (!b.editing) return;
-        if (ta.value !== b.text) pushUndo();
-        b.text = ta.value; b.editing = false; paintText(root, b); markDirty();
-        reportMissing(b.text);
-      };
-      ta.addEventListener('blur', commit);
-      ta.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { b.editing = false; paintText(root, b); }
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commit();
+  function makeEditor(root, body, b) {
+    var surface = document.createElement('div');
+    surface.className = 'tester-text';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'tester-glyphs');
+    svg.setAttribute('aria-hidden', 'true');
+    var selG = document.createElementNS(NS, 'g');
+    selG.setAttribute('class', 'tester-sel');
+    var inkG = document.createElementNS(NS, 'g');
+    inkG.setAttribute('class', 'tester-ink');
+    inkG.setAttribute('fill', 'currentColor');
+    svg.appendChild(selG); svg.appendChild(inkG);
+    var caret = document.createElement('span');
+    caret.className = 'tester-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    var ta = document.createElement('textarea');
+    ta.className = 'tester-input';
+    ta.value = b.text;
+    ta.rows = 1;
+    ta.maxLength = BLOCK_MAX;   // the same cap a project file gets (narrowed to what the budget leaves on focus)
+    ta.setAttribute('aria-label', 'Preview text');
+    ta.setAttribute('placeholder', PLACEHOLDER);
+    ta.setAttribute('spellcheck', 'false');
+    ta.setAttribute('autocomplete', 'off');
+    ta.setAttribute('autocorrect', 'off');
+    ta.setAttribute('autocapitalize', 'off');
+    ta.setAttribute('wrap', 'off');
+    ta.setAttribute('data-gramm', 'false');   // grammar extensions stay out of it
+    surface.appendChild(svg); surface.appendChild(caret); surface.appendChild(ta);
+    body.appendChild(surface);
+
+    var ed = {
+      b: b, root: root, surface: surface, ta: ta, lay: null, maxW: 0, L: 0, capH: 0, padTop: 0,
+      focused: false, composing: false, compStart: 0, compLen: 0, burst: false, moved: false, lastEdit: 0,
+      goalX: null, sel: null, lastF: 0, raf: 0, needPaint: false, wantScroll: false, placing: false, winBlur: false,
+      flip: false, caretKey: '', selKey: '', missT: 0, ctx: null, ink: '',
+    };
+    root.liquidEd = ed;
+
+    // ---- drawing
+    function baseline(li) { return ed.padTop + li * ed.L + (ed.L + ed.capH) / 2; }
+    // One <g> per drawn line, its glyphs in line-local coordinates, so a
+    // line that didn't change keeps its nodes and only moves: typing redraws
+    // the line under the caret, not the whole block.
+    function lineMarkup(gl, lay, by) {
+      var out = '', k = lay.k, sz = lay.size, capH = CAP_EM * sz, tail = ') scale(' + k.toFixed(5) + ')"/>';
+      var ty = (by - MET.base * k).toFixed(2);
+      for (var j = 0; j < gl.length; j++) {
+        var g = gl[j];
+        if (g.notdef) {
+          out += '<rect class="notdef" fill="none" x="' + (g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - capH).toFixed(1) +
+            '" width="' + (g.w * 0.8).toFixed(1) + '" height="' + capH.toFixed(1) + '" rx="' + (0.04 * sz).toFixed(1) + '"/>';
+          continue;
+        }
+        if (!FLAT[g.L]) ensureDef(g.L);
+        out += '<use href="#' + gid(g.L) + '" transform="translate(' + (g.x - (g.s.x0 - g.s.lsb) * k).toFixed(2) + ' ' + ty + tail;
+      }
+      return out;
+    }
+    function renderInk(lay) {
+      var by = (ed.L + ed.capH) / 2, pool = {}, next = [], i, c, m;
+      for (c = inkG.firstChild; c; c = c.nextSibling) (pool[c.liquidM] || (pool[c.liquidM] = [])).push(c);
+      for (i = 0; i < lay.lines.length; i++) {
+        m = lineMarkup(lay.lines[i].glyphs, lay, by);
+        c = pool[m] && pool[m].pop();
+        if (!c) { c = document.createElementNS(NS, 'g'); c.innerHTML = m; c.liquidM = m; }
+        var y = (ed.padTop + i * ed.L).toFixed(1);
+        if (c.liquidY !== y) { c.liquidY = y; c.setAttribute('transform', 'translate(0 ' + y + ')'); }
+        next.push(c);
+      }
+      for (i = 0; i < next.length; i++) if (inkG.childNodes[i] !== next[i]) inkG.insertBefore(next[i], inkG.childNodes[i] || null);
+      while (inkG.childNodes.length > next.length) inkG.removeChild(inkG.lastChild);
+    }
+    ed.paint = function (w) {
+      if (ed.raf) { cancelAnimationFrame(ed.raf); ed.raf = 0; }
+      ed.needPaint = false;
+      if (w !== undefined) ed.maxW = w;
+      var maxW = ed.maxW > 0 ? ed.maxW : (testerList.clientWidth > 100 ? testerList.clientWidth - 52 : 1000);
+      if (ta.value !== b.text && !ed.composing) ta.value = b.text;   // the textarea always holds the block's text
+      var text = b.text, lay = layoutText(text, b.size, b.tr, maxW, true);
+      var size = lay.size, L = b.lh / 100 * size, capH = CAP_EM * size;
+      ed.padTop = headroomOf(size, L, capH);
+      ed.lay = lay; ed.L = L; ed.capH = capH;
+      var ink = inkOf(b);
+      if (ink !== ed.ink) {   // selection and placeholder stay visible on a dim ink too
+        ed.ink = ink;
+        surface.style.color = ink;
+        var tones = inkTones(ink, ink === '#000' ? '#fff' : '#000');   // the ground: paper, or the black specimen
+        surface.style.setProperty('--sel-c', tones.sel);
+        surface.style.setProperty('--ph-a', tones.ph);
+      }
+      // an empty block keeps the height of one line
+      svg.setAttribute('height', (ed.padTop + lay.lines.length * L).toFixed(1));
+      var ph = null;
+      if (!text) {   // a muted placeholder in the font itself, kept to the one empty line
+        ph = layoutText(PLACEHOLDER, size, b.tr, Infinity, false);
+        var pw = ph.lines[0].w;
+        if (pw > maxW) ph = layoutText(PLACEHOLDER, Math.max(6, size * maxW / pw), b.tr, Infinity, false);
+      }
+      inkG.setAttribute('class', ph ? 'tester-ink is-ph' : 'tester-ink');
+      renderInk(ph || lay);
+      if (ed.focused && !ed.composing) snapSel();
+      overlay();
+    };
+    function queue(repaint) {
+      if (repaint) ed.needPaint = true;
+      if (ed.raf) return;
+      ed.raf = requestAnimationFrame(function () {
+        ed.raf = 0;
+        if (ed.needPaint) ed.paint(); else overlay();
       });
-      return;
+    }
+    function current() { if (!ed.lay || ed.lay.text !== ta.value || ed.needPaint) ed.paint(); return ed.lay; }
+
+    // offset -> [line, x] on the drawn layout (an offset inside a cluster
+    // reads as the boundary before it)
+    function locate(o) {
+      var lay = ed.lay, p = lay.pos[o];
+      if (p) return p;
+      return lay.pos[lay.stops[lowerIdx(lay.stops, o)]];
+    }
+    // x of a boundary on line li; the end of a line's text is that line's end
+    function xOn(li, o) {
+      var lines = ed.lay.lines, ln = lines[li];
+      return o >= ln.o1 && li < lines.length - 1 ? ln.end : locate(o)[1];
+    }
+    function overlay() {
+      var lay = ed.lay;
+      if (!lay) return;
+      if (lay.text !== ta.value) { queue(true); return; }
+      var s = ta.selectionStart, e = ta.selectionEnd, maxW = lay.maxW, sz = lay.size, capH = ed.capH, rects = '';
+      var cl = function (x) { return Math.max(0, Math.min(maxW, x)); };
+      if (ed.focused && e > s) {
+        var pad = Math.max(0, Math.min(0.14 * sz, (ed.L - capH) / 2));
+        for (var li = 0; li < lay.lines.length; li++) {
+          var ln = lay.lines[li], a = Math.max(s, ln.o0), z = Math.min(e, ln.o1);
+          if (z <= a) continue;
+          var x0 = cl(xOn(li, a)), x1 = cl(xOn(li, z));
+          if (ln.br && e >= ln.o1) x1 = cl(ln.end) + 0.25 * sz;   // the line break itself is selected
+          rects += '<rect x="' + x0.toFixed(1) + '" y="' + (baseline(li) - capH - pad).toFixed(1) + '" width="' +
+            Math.max(0, x1 - x0).toFixed(1) + '" height="' + (capH + 2 * pad).toFixed(1) + '"/>';
+        }
+      }
+      if (ed.focused && ed.composing && ed.compLen > 0) {   // the text an IME is still composing
+        var c0 = ed.compStart, c1 = Math.min(lay.text.length, c0 + ed.compLen), th = Math.max(1, 0.02 * sz);
+        for (var lj = 0; lj < lay.lines.length; lj++) {
+          var lm = lay.lines[lj], ca = Math.max(c0, lm.o0), cz = Math.min(c1, lm.o1);
+          if (cz <= ca) continue;
+          var u0 = cl(xOn(lj, ca)), u1 = cl(xOn(lj, cz));
+          rects += '<rect class="comp" x="' + u0.toFixed(1) + '" y="' + (baseline(lj) + 0.9 * DESC_EM * sz).toFixed(1) + '" width="' +
+            Math.max(0, u1 - u0).toFixed(1) + '" height="' + th.toFixed(1) + '"/>';   // under the dot below
+        }
+      }
+      if (rects !== ed.selKey) { ed.selKey = rects; selG.innerHTML = rects; }
+      // caret at the moving end of the selection; the textarea sits on it so
+      // an IME's candidate window and mobile scrolling land where you type
+      var f = Math.min(selAF()[1], lay.text.length), p = locate(f), by = baseline(p[0]);
+      var cw = Math.max(2, Math.round(sz / 40) / 2), cx = Math.max(0, Math.min(maxW - cw, p[1] - cw / 2));
+      caret.classList.toggle('on', ed.focused && s === e);
+      caret.style.width = cw + 'px';
+      caret.style.height = capH.toFixed(1) + 'px';
+      caret.style.transform = 'translate(' + cx.toFixed(1) + 'px,' + (by - capH).toFixed(1) + 'px)';
+      var key = cx.toFixed(1) + ',' + by.toFixed(1);
+      if (key !== ed.caretKey) {   // a moved caret shows solid, then blinks again
+        ed.caretKey = key;
+        caret.style.animationName = (ed.flip = !ed.flip) ? 'tester-blink-b' : 'tester-blink-a';
+      }
+      if (!ed.ctx) {   // (under the pointer while a right-click menu is open)
+        ta.style.left = Math.max(0, Math.min(maxW - 1, p[1])).toFixed(1) + 'px';
+        ta.style.top = Math.max(0, by - 1).toFixed(1) + 'px';
+      }
+      if (ed.wantScroll && ed.focused) {
+        ed.wantScroll = false;
+        if (caret.scrollIntoView) caret.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
     }
 
-    var holder = document.createElement('div');
-    holder.className = 'tester-text';
-    holder.style.lineHeight = (b.lh / 100);
-    holder.style.fontSize = b.size + 'px';
-    // stacked marks on the first line need headroom the leading doesn't give
-    if (/[\u0300-\u036f]/.test(b.text.normalize('NFD'))) holder.style.paddingTop = (0.2 * b.size).toFixed(1) + 'px';
-    holder.style.color = b.paper || state.ink === '#000000' ? '#000' : state.ink;
-    holder.title = 'Click to edit this text';
-    holder.tabIndex = 0;
-    holder.setAttribute('role', 'button');
-    holder.setAttribute('aria-label', 'Preview text: ' + b.text + '. Press Enter to edit.');
-    var edit = function () { b.editing = true; paintText(root, b); };
-    holder.addEventListener('click', edit);
-    holder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); edit(); } });
-    body.appendChild(holder);
-    fillText(holder, b.text, fitSize(b, body), b.tr);
-  }
-  // On a narrow screen a 200px word can be wider than the block; shrink the
-  // rendering (not the setting) so the longest word still fits.
-  function fitSize(b, body) {
-    var avail = (body.clientWidth || testerList.clientWidth - 52) - 2;
-    if (!(avail > 0)) return b.size;
-    var widest = 0;
-    b.text.split(/\s+/).forEach(function (w) {
-      var em = 0, prev = null;
-      GC.clusters(w).forEach(function (L) {
-        if (!canDraw(L)) { em += 0.42; prev = null; return; }
-        em += (spacingOf(L).adv + (prev ? kernOf(prev, L) : 0)) / MET.em + b.tr;
-        prev = L;
-      });
-      if (em > widest) widest = em;
-    });
-    return widest * b.size > avail ? Math.max(8, Math.floor(avail / widest)) : b.size;
-  }
+    // ---- selection: anchor and moving end, always on cluster boundaries
+    function selAF() {
+      var s = ta.selectionStart, e = ta.selectionEnd, d = ed.sel;
+      if (s === e) return [s, s];
+      if (d && Math.min(d[0], d[1]) === s && Math.max(d[0], d[1]) === e) return d;
+      return ta.selectionDirection === 'backward' ? [e, s] : [s, e];
+    }
+    function setSel(a, f) {
+      ed.sel = [a, f]; ed.lastF = f; ed.wantScroll = true;
+      ta.setSelectionRange(Math.min(a, f), Math.max(a, f), f < a ? 'backward' : 'forward');
+      queue();
+    }
+    function snapTo(o, dir) {
+      var lay = ed.lay;
+      if (lay.pos[o]) return o;
+      var st = lay.stops, i = lowerIdx(st, o);
+      return dir > 0 && i + 1 < st.length ? st[i + 1] : st[i];
+    }
+    function snapSel() {
+      var lay = ed.lay;
+      if (!lay || lay.text !== ta.value) return;
+      var s = ta.selectionStart, e = ta.selectionEnd, s2, e2, af = selAF();
+      if (s === e) s2 = e2 = snapTo(s, s >= ed.lastF ? 1 : -1);
+      else { s2 = snapTo(s, -1); e2 = snapTo(e, 1); }
+      if (s2 !== s || e2 !== e) {
+        var back = af[1] < af[0];
+        ta.setSelectionRange(s2, e2, back ? 'backward' : 'forward');
+        ed.sel = s2 === e2 ? null : back ? [e2, s2] : [s2, e2];
+      }
+      ed.lastF = selAF()[1];
+    }
+    ed.syncSel = function () { if (!ed.composing && ed.lay && ed.lay.text === ta.value) snapSel(); queue(); };
+    function stepStop(o, dir) {
+      var st = ed.lay.stops, i = lowerIdx(st, o);
+      if (dir > 0) { if (st[i] <= o) i++; return st[Math.min(i, st.length - 1)]; }
+      if (st[i] === o) i--;
+      return st[Math.max(i, 0)];
+    }
+    function nearestOn(ln, x) {
+      var best = ln.stops[0][0], bd = Infinity;
+      for (var i = 0; i < ln.stops.length; i++) {
+        var d = Math.abs(Math.min(ln.stops[i][1], ed.lay.maxW) - x);
+        if (d < bd) { bd = d; best = ln.stops[i][0]; }
+      }
+      return best;
+    }
+    function moveH(dir, shift) {
+      var af = selAF(), s = ta.selectionStart, e = ta.selectionEnd;
+      var to = !shift && s !== e ? (dir > 0 ? e : s) : stepStop(af[1], dir);
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = null;
+    }
+    // up / down go to the rendered line above / below, keeping the column
+    function moveV(dir, shift) {
+      var af = selAF(), s = ta.selectionStart, e = ta.selectionEnd, lay = ed.lay;
+      var p = locate(!shift && s !== e ? (dir < 0 ? s : e) : af[1]), li = p[0] + dir, to;
+      if (ed.goalX == null) ed.goalX = Math.min(p[1], lay.maxW);
+      if (li < 0) to = 0;
+      else if (li >= lay.lines.length) to = lay.text.length;
+      else to = nearestOn(lay.lines[li], ed.goalX);
+      var gx = ed.goalX;
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = gx;
+    }
+    function lineEdge(end, shift) {
+      var af = selAF(), st = ed.lay.lines[locate(af[1])[0]].stops, to = end ? st[st.length - 1][0] : st[0][0];
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = null;
+    }
+    // the word (or run of spaces) at a boundary; before: the one to its left
+    function wordAt(o, before) {
+      var toks = ed.lay.toks, n = toks.length;
+      if (!n) return [0, 0];
+      var i = o >= ed.lay.text.length ? n - 1 : lowerIdx(toks, o, 'o0');
+      if (before && i > 0 && toks[i].o0 === o && toks[i - 1].t !== 'br') i--;
+      var kind = toks[i].t, a = i, z = i;
+      if (kind === 'br') return [o, o];
+      while (a > 0 && toks[a - 1].t === kind) a--;
+      while (z < n - 1 && toks[z + 1].t === kind) z++;
+      return [toks[a].o0, toks[z].o1];
+    }
+    function paraAt(o) {
+      var t = ed.lay.text, z = t.indexOf('\n', o);
+      return [t.lastIndexOf('\n', o - 1) + 1, z < 0 ? t.length : z];
+    }
+    // a pointer position -> the nearest boundary on the nearest rendered line
+    function hit(cx, cy) {
+      var lay = current(), r = surface.getBoundingClientRect(), x = cx - r.left, y = cy - r.top;
+      var li = ed.L > 0 ? Math.floor((y - ed.padTop) / ed.L) : 0;
+      li = Math.max(0, Math.min(lay.lines.length - 1, li));
+      return { o: nearestOn(lay.lines[li], x), x: x };
+    }
+    function unitAt(h, mode) {
+      if (mode === 'word') return wordAt(h.o, h.x < locate(h.o)[1]);
+      if (mode === 'para') return paraAt(h.o);
+      return [h.o, h.o];
+    }
+    function focusQuiet() {
+      if (document.activeElement === ta) return;
+      ed.placing = true;
+      try { ta.focus({ preventScroll: true }); } finally { ed.placing = false; }
+    }
+    ed.focusAt = function (s, e, dir) {
+      focusQuiet();
+      current();
+      ta.setSelectionRange(s, e, dir === 'backward' ? 'backward' : 'forward');
+      ed.sel = null; ed.lastF = dir === 'backward' ? s : e;
+      snapSel();
+      ed.wantScroll = true;
+      overlay();
+    };
 
-  function fillText(holder, text, size, tr) {
-    var k = size / MET.em, space = wordEm() * size + tr * size;
-    text.split(/\s+/).forEach(function (chunk) {
-      if (!chunk) return;
-      var word = document.createElement('span');
-      word.className = 'word';
-      var prev = null;
-      GC.clusters(chunk).forEach(function (L) {
-        var el;
-        if (canDraw(L)) {
-          if (!FLAT[L]) ensureDef(L);
-          el = glyphSvg(L, size, 'text');
-          if (prev) el.style.marginLeft = (kernOf(prev, L) * k + tr * size).toFixed(2) + 'px';
-          prev = L;
-        } else {
-          el = notdefSvg(size);
-          if (prev) el.style.marginLeft = (tr * size).toFixed(2) + 'px';
-          prev = null;
+    // ---- pointer: a click anywhere in the block below its controls places
+    // the caret, drag selects, double-click a word, triple-click the line;
+    // Shift+click extends
+    var inHead = function (t) { return t && t.closest && !!t.closest('.tester-head'); };
+    // A right-click keeps the text focused and opens the textarea's own
+    // menu (Cut / Copy / Paste / Select all on the selection): the
+    // textarea is slipped under the pointer until the menu is up. A
+    // right-click outside the selection first moves the caret there (on a
+    // Mac, selects the word there, as Mac text fields do).
+    function endCtx() {
+      if (!ed.ctx) return;
+      ed.ctx = null; ta.classList.remove('is-ctx');
+      overlay();
+    }
+    function startCtx(e) {
+      var wasIn = document.activeElement === ta, h = hit(e.clientX, e.clientY), s = ta.selectionStart, z = ta.selectionEnd;
+      focusQuiet();
+      if (!wasIn || s === z || h.o < s || h.o > z) {
+        var w = IS_MAC ? unitAt(h, 'word') : [h.o, h.o];
+        setSel(w[0], w[1]); ed.moved = true;
+      }
+      var r = surface.getBoundingClientRect();
+      ed.ctx = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection]; ta.classList.add('is-ctx');
+      ta.style.left = (e.clientX - r.left - 12).toFixed(1) + 'px';
+      ta.style.top = (e.clientY - r.top - 12).toFixed(1) + 'px';
+    }
+    root.addEventListener('contextmenu', function () {
+      var c = ed.ctx;
+      if (!c) return;
+      // the browser may have moved the textarea's own selection to whatever
+      // of its (unseen) text is under the pointer: the menu acts on ours
+      if (ta.selectionStart !== c[0] || ta.selectionEnd !== c[1]) ta.setSelectionRange(c[0], c[1], c[2]);
+      setTimeout(endCtx, 0);
+    });
+    // the scroller the specimen moves in (the page itself on a phone)
+    function scrollerOf() {
+      var sc = $('specimenScroll');
+      return sc && sc.scrollHeight > sc.clientHeight + 1 && getComputedStyle(sc).overflowY !== 'visible'
+        ? sc : document.scrollingElement || document.documentElement;
+    }
+    root.addEventListener('mousedown', function (e) {
+      if (inHead(e.target)) return;
+      endCtx();
+      if (e.button !== 0) {
+        if (e.button === 2) startCtx(e);
+        else if (e.button === 1 && document.activeElement === ta) e.preventDefault();   // the selection stays
+        if (e.button === 2) e.preventDefault();
+        return;
+      }
+      e.preventDefault();   // focus stays in the textarea, no page text selection
+      var wasIn = document.activeElement === ta, h = hit(e.clientX, e.clientY);
+      var af = selAF(), mode = e.detail >= 3 ? 'para' : e.detail === 2 ? 'word' : 'char', A;
+      focusQuiet();
+      if (e.shiftKey && wasIn) { A = [af[0], af[0]]; mode = 'char'; setSel(af[0], h.o); }
+      else { A = unitAt(h, mode); setSel(A[0], A[1]); }
+      ed.moved = true; ed.goalX = null; ed.wantScroll = false;
+      // a drag held at the top or bottom edge of the view scrolls it, and
+      // the selection follows
+      var last = null, sc = scrollerOf(), tick = 0;
+      var extend = function () {
+        var r = unitAt(hit(last.clientX, last.clientY), mode);
+        if (r[0] < A[0]) setSel(A[1], r[0]); else setSel(A[0], Math.max(A[1], r[1]));
+        ed.wantScroll = false;
+      };
+      var edge = function () {
+        tick = 0;
+        if (!last) return;
+        var page = sc === document.scrollingElement || sc === document.documentElement;
+        var rr = page ? { top: 0, bottom: innerHeight } : sc.getBoundingClientRect(), zone = 30, y = last.clientY;
+        var d = y < rr.top + zone ? y - rr.top - zone : y > rr.bottom - zone ? y - rr.bottom + zone : 0;
+        if (!d) return;
+        var before = sc.scrollTop;
+        sc.scrollTop = before + Math.max(-48, Math.min(48, d / 2));   // faster the further past the edge
+        if (sc.scrollTop === before) return;
+        extend();
+        tick = requestAnimationFrame(edge);
+      };
+      var move = function (ev) {
+        last = ev; extend();
+        if (!tick) tick = requestAnimationFrame(edge);
+      };
+      var up = function () {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (tick) cancelAnimationFrame(tick);
+        tick = 0; last = null;
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    // after Esc the block itself has focus: Enter goes back into its text
+    root.addEventListener('keydown', function (e) {
+      if (e.target !== root || e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      ed.focusAt(ta.selectionStart, ta.selectionEnd, ta.selectionDirection);
+    });
+    // a tap where no mouse events follow still lands the caret
+    root.addEventListener('click', function (e) {
+      if (document.activeElement === ta || inHead(e.target)) return;
+      var h = hit(e.clientX, e.clientY);
+      ed.focusAt(h.o, h.o);
+      ed.moved = true;
+    });
+
+    // ---- keys: only what the drawn layout has to answer; the rest is native
+    ta.addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;   // the IME's keys
+      endCtx();
+      var k = e.key, mod = e.ctrlKey || e.metaKey, plain = !mod && !e.altKey;
+      if (k === 'Escape' || (k === 'Enter' && mod)) {   // leave the text, onto the block itself
+        e.preventDefault();
+        root.focus({ preventScroll: true });
+        if (document.activeElement === ta) ta.blur();
+        return;
+      }
+      if (mod && !e.altKey && (k === 'a' || k === 'A')) ed.moved = true;   // select all: what you type next is its own step
+      var horiz = k === 'ArrowLeft' || k === 'ArrowRight', vert = k === 'ArrowUp' || k === 'ArrowDown';
+      var edge = k === 'Home' || k === 'End';
+      if (!horiz && !vert && !edge && k !== 'PageUp' && k !== 'PageDown') return;
+      current();
+      ed.moved = true;
+      if (horiz && plain) moveH(k === 'ArrowRight' ? 1 : -1, e.shiftKey);
+      else if (vert && plain) moveV(k === 'ArrowDown' ? 1 : -1, e.shiftKey);
+      else if (edge && !mod) lineEdge(k === 'End', e.shiftKey);
+      else if (horiz && IS_MAC && e.metaKey && !e.ctrlKey && !e.altKey) lineEdge(k === 'ArrowRight', e.shiftKey);
+      else {   // word jumps, start / end of the text: native, then snapped to a cluster boundary
+        ed.goalX = null; ed.wantScroll = true;
+        setTimeout(ed.syncSel, 0);
+        return;
+      }
+      e.preventDefault();
+    });
+    ta.addEventListener('keyup', ed.syncSel);
+    ta.addEventListener('select', ed.syncSel);
+    ta.addEventListener('selectionchange', ed.syncSel);
+
+    // ---- editing
+    // what this block may grow to: its cap, and what the other blocks leave
+    // of the budget (never below what it already holds, so it can shrink)
+    function capText() { ta.maxLength = Math.max(ta.value.length, Math.min(BLOCK_MAX, TEXT_BUDGET - previewChars(b))); }
+    ta.addEventListener('beforeinput', function (e) {
+      var it = e.inputType || '';
+      if (it === 'historyUndo' || it === 'historyRedo') {   // Edit › Undo, shake to undo: the app's history
+        e.preventDefault();
+        if (it === 'historyUndo') undo(); else redo();
+        return;
+      }
+      endCtx();
+      // its own undo step: a paste or cut, or typing over a selection
+      // (after Ctrl/⌘A, a drag, a double-click)
+      if (/Paste|Drop|Cut|Yank/.test(it) || (!ed.composing && ta.selectionStart !== ta.selectionEnd)) ed.moved = true;
+      // the textarea's maxLength is this block's share of the preview budget
+      // (refreshed here: an undo may have changed the other blocks since focus)
+      capText();
+      if (/^insert/.test(it) && it !== 'insertCompositionText' && ta.maxLength > 0) {
+        var add = e.data != null ? e.data.length : e.dataTransfer ? (e.dataTransfer.getData('text/plain') || '').length : 1;
+        if (ta.value.length - (ta.selectionEnd - ta.selectionStart) + add > ta.maxLength) {
+          toast('Preview text is full: ' + BLOCK_MAX.toLocaleString('en') + ' characters a block, ' + TEXT_BUDGET.toLocaleString('en') + ' in all', 3200);
         }
-        word.appendChild(el);
-      });
-      word.style.marginRight = space.toFixed(2) + 'px';
-      holder.appendChild(word);
-      holder.appendChild(document.createTextNode('​'));
+      }
     });
+    ta.addEventListener('input', function (e) {
+      var it = e.inputType || '';
+      if (it === 'historyUndo' || it === 'historyRedo') {   // a native undo slipped past beforeinput:
+        ta.value = b.text;                                   // drop it and use the app's history
+        if (it === 'historyUndo') undo(); else redo();
+        return;
+      }
+      if (ta.value === b.text) { queue(); return; }
+      // one undo step per typing burst; the snapshot still holds the old text
+      var now = Date.now();
+      if (!ed.burst || ed.moved || (!ed.composing && now - ed.lastEdit > BURST_MS)) pushUndo();
+      ed.burst = true; ed.moved = /Paste|Drop|Cut|Yank/.test(it); ed.lastEdit = now;
+      b.text = ta.value;
+      ed.sel = null; ed.wantScroll = true; ed.goalX = null;
+      queue(true);
+      markDirty();
+      clearTimeout(ed.missT);
+      ed.missT = setTimeout(function () { reportMissing(b.text); }, 1200);   // once typing pauses
+    });
+    ta.addEventListener('compositionstart', function () {
+      if (ta.selectionStart !== ta.selectionEnd) ed.moved = true;   // composing over a selection: a new step
+      ed.composing = true; ed.compStart = ta.selectionStart; ed.compLen = 0;
+    });
+    ta.addEventListener('compositionupdate', function (e) { ed.compLen = (e.data || '').length; queue(); });
+    ta.addEventListener('compositionend', function () { ed.composing = false; ed.compLen = 0; queue(true); });
+
+    ta.addEventListener('focus', function () {
+      activeEd = ed; ed.focused = true;
+      capText();
+      surface.classList.add('is-focused');
+      // Tab lands at the end of the text; a click or a window coming back
+      // keeps the caret it set or had
+      if (!ed.placing && !ed.winBlur) { var n = ta.value.length; ta.setSelectionRange(n, n); ed.sel = null; ed.lastF = n; }
+      ed.winBlur = false; ed.burst = false; ed.goalX = null; ed.wantScroll = !ed.placing;
+      queue();
+    });
+    ta.addEventListener('blur', function () {
+      endCtx();
+      ed.winBlur = typeof document.hasFocus === 'function' && !document.hasFocus();
+      if (activeEd === ed) activeEd = null;
+      ed.focused = false; ed.composing = false; ed.burst = false;
+      surface.classList.remove('is-focused');
+      clearTimeout(ed.missT);
+      if (!ed.winBlur) reportMissing(b.text);
+      queue();
+    });
+    return ed;
   }
 
+  // what the font can't draw yet, one entry per grapheme (a flag, not its two halves)
   function missingIn(text) {
-    var miss = [];
-    GC.clusters(text).forEach(function (L) {
-      if (/^\s$/.test(L) || canDraw(L) || miss.indexOf(L) >= 0) return;
-      miss.push(L);
+    var miss = [], units = graphemeStarts(text) ? Array.from(SEG.segment(text), function (x) { return x.segment; }) : null;
+    (units || GC.clusters(text)).forEach(function (u) {
+      if (/^\s+$/.test(u)) return;
+      var cl = units ? GC.clusters(u) : [u];
+      if (cl.every(canDraw)) return;
+      var L = cl.join('');
+      if (miss.indexOf(L) < 0) miss.push(L);
     });
     return miss;
   }
+  var lastMissing = '';
   function reportMissing(text) {
     var miss = missingIn(text).join(' ');
     if (miss && miss !== lastMissing) toast('Not in this font yet: ' + miss, 3200);
     lastMissing = miss;
   }
 
+  // re-layout every block; widths are read first so the reads don't
+  // interleave with the writes
   function repaintAllTesters() {
-    var roots = testerList.querySelectorAll('.tester');
-    for (var i = 0; i < roots.length; i++) {
-      if (!state.blocks[i].editing) paintText(roots[i], state.blocks[i]);
-    }
+    var eds = [];
+    Array.prototype.forEach.call(testerList.children, function (r) { if (r.liquidEd) eds.push(r.liquidEd); });
+    var ws = eds.map(function (ed) { return ed.surface.clientWidth; });
+    eds.forEach(function (ed, i) { ed.paint(ws[i]); });
   }
 
   // ------------------------------------------------------------- glyph set
@@ -1074,7 +1811,7 @@
   // structural edits undo as cleanly as drags), plus the shape, spacing and
   // accent settings and the preview blocks — anything a click can lose.
   function blocksData() {
-    return state.blocks.map(function (b) { return { text: b.text, size: b.size, lh: b.lh, tr: b.tr, paper: b.paper }; });
+    return state.blocks.map(function (b) { return { id: b.id, text: b.text, size: b.size, lh: b.lh, tr: b.tr, paper: b.paper }; });
   }
   function snapshot() {
     var sh = {};
@@ -1096,11 +1833,33 @@
       for (var k in o.lay) GC.LAYOUT[k] = o.lay[k];
       syncShape();
     }
-    if (o.blocks && JSON.stringify(o.blocks) !== JSON.stringify(blocksData())) {
-      state.blocks = o.blocks.map(function (b) { return block(b.text, b.size, b.lh, b.tr, b.paper); });
-      renderTesters();
-    }
+    if (o.blocks && JSON.stringify(o.blocks) !== JSON.stringify(blocksData())) restoreBlocks(o.blocks);
     bumpAll();
+  }
+  // Blocks are matched by id and updated in place. When only text changed
+  // (undoing a typing burst) every block keeps its DOM, so the textarea you
+  // are typing in stays the focused element and the caret lands where the
+  // undone edit was; a block put back or taken away rebuilds the list,
+  // which refocuses the block you were in by its id.
+  function restoreBlocks(data) {
+    var byId = {}, sameSet = data.length === state.blocks.length;
+    state.blocks.forEach(function (b) { byId[b.id] = b; });
+    data.forEach(function (d, i) { if (!state.blocks[i] || state.blocks[i].id !== d.id) sameSet = false; });
+    var textOnly = sameSet && data.every(function (d, i) {
+      var b = state.blocks[i];
+      return d.size === b.size && d.lh === b.lh && d.tr === b.tr && !!d.paper === b.paper;
+    });
+    if (textOnly) {
+      data.forEach(function (d, i) { var b = state.blocks[i]; if (b.text !== d.text) setBlockText(b, d.text); });
+      return;
+    }
+    state.blocks = data.map(function (d) {
+      var b = d.id > 0 && byId[d.id];
+      if (!b) return block(d.text, d.size, d.lh, d.tr, d.paper, d.id);
+      b.text = d.text; b.size = d.size; b.lh = d.lh; b.tr = d.tr; b.paper = !!d.paper;
+      return b;
+    });
+    renderTesters();
   }
   function pushUndo() {
     undoStack.push(snapshot());
@@ -1110,6 +1869,7 @@
   }
   function undo() {
     if (!undoStack.length) return;
+    if (activeEd) activeEd.burst = false;   // the next keystroke in a preview starts a new step
     redoStack.push(snapshot());
     restore(undoStack.pop());
     if (state.activeNode >= viewNodes(viewOf(state.selected)).length) state.activeNode = -1;
@@ -1117,6 +1877,7 @@
   }
   function redo() {
     if (!redoStack.length) return;
+    if (activeEd) activeEd.burst = false;
     undoStack.push(snapshot());
     restore(redoStack.pop());
     schedule(); markDirty();
@@ -1331,16 +2092,23 @@
     return true;
   }
   document.addEventListener('keydown', function (e) {
+    if (e.isComposing || e.keyCode === 229) return;   // keys an IME is using
     // only text-like fields keep their own keys; a slider, select or button
-    // that still has focus must not swallow Ctrl/⌘Z
+    // that still has focus must not swallow Ctrl/⌘Z. Preview text is typed
+    // into a textarea too, so none of the editor's keys fire there — but its
+    // undo is the app's (one step per typing burst), never the textarea's.
     var t = e.target, typing = t && (t.tagName === 'TEXTAREA' || t.isContentEditable ||
       (t.tagName === 'INPUT' && /^(text|number|search|email|url|tel|password)$/.test(t.type)));
+    var preview = !!(t && t.classList && t.classList.contains('tester-input'));
     var mod = e.metaKey || e.ctrlKey, k = e.key;
     if (mod && (k === 'z' || k === 'Z')) {
-      if (typing) return;   // native undo inside text fields
+      if (typing && !preview) return;   // native undo inside the other text fields
       e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
     }
-    if (mod && (k === 'y' || k === 'Y')) { e.preventDefault(); redo(); return; }
+    if (mod && (k === 'y' || k === 'Y')) {
+      if (typing && !preview) return;
+      e.preventDefault(); redo(); return;
+    }
     if (mod && (k === 's' || k === 'S')) { e.preventDefault(); saveProjectFile(); return; }
     if (mod && (k === 'o' || k === 'O')) { e.preventDefault(); $('projectFile').click(); return; }
     if (typing || mod) return;
@@ -1425,6 +2193,9 @@
   bindShape('sldMelt', 'valMelt', 'melt', null);
   bindShape('sldTension', 'valTension', 'tension', f1);
   bindShape('sldWobble', 'valWobble', 'wobble', f1);
+  var pct = function (v) { return Math.round(v * 100) + '%'; };
+  bindShape('sldFlow', 'valFlow', 'flow', pct);
+  bindShape('sldDrip', 'valDrip', 'drip', pct);
   bindShape('sldSmooth', 'valSmooth', 'smooth', null);
   bindRange('sldSpacing', 'valSpacing', function () { return state.spacing; },
     function (v) { state.spacing = v; }, f1, false);
@@ -1473,10 +2244,11 @@
   });
 
   $('btnAddBlock').addEventListener('click', function () {
+    if (!roomFor(1, 17)) return;
     pushUndo();
     var nb = block('NEW PREVIEW BLOCK', 120, 120, 0.01);
     state.blocks.push(nb);
-    renderTesters(nb); markDirty();
+    renderTesters(nb, 'type'); markDirty();   // focused with its text selected: just type
   });
   // proofing strings a type designer reaches for
   var PROOFS = {
@@ -1486,12 +2258,13 @@
     pangram: 'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789',
   };
   $('proofSelect').addEventListener('change', function (e) {
-    var v = e.target.value, t = PROOFS[v];
+    var v = e.target.value, t = PROOFS[v], WF = 'ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026';
     e.target.value = '';
+    if (v === 'waterfall' ? !roomFor(4, 4 * WF.length) : t && !roomFor(1, t.length)) return;
     if (v) pushUndo();
     if (v === 'waterfall') {
       // one line at falling sizes: where the melt stops reading
-      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block('ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026', sz, 145, 0.01)); });
+      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block(WF, sz, 145, 0.01)); });
       renderTesters(); markDirty(); $('specimenScroll').scrollTop = 0;
       return;
     }
@@ -1527,6 +2300,8 @@
     $('sldMelt').value = state.melt; $('valMelt').textContent = state.melt;
     $('sldTension').value = state.tension; $('valTension').textContent = f1(state.tension);
     $('sldWobble').value = state.wobble; $('valWobble').textContent = f1(state.wobble);
+    $('sldFlow').value = state.flow; $('valFlow').textContent = Math.round(state.flow * 100) + '%';
+    $('sldDrip').value = state.drip; $('valDrip').textContent = Math.round(state.drip * 100) + '%';
     $('sldSmooth').value = state.smooth; $('valSmooth').textContent = state.smooth;
     $('sldSpacing').value = state.spacing; $('valSpacing').textContent = f1(state.spacing);
     $('sldKern').value = state.kern; $('valKern').textContent = Math.round(state.kern * 100) + '%';
@@ -1577,12 +2352,21 @@
   // The whole project autosaves to this browser, and can be saved to /
   // opened from a .liquid.json file. `chains` carries every skeleton with the
   // edits applied, which is what the Poster tool reads.
+  // #saveState is a polite live region: it speaks only when the outcome
+  // changes, once things settle ('Saved in browser', 'Not saved'). Pending
+  // work only dims it (a class, which a screen reader doesn't announce), so
+  // typing in a preview or nudging a node is never read out key by key.
   var dirtyT = null;
+  function sayState(t) { var el = $('saveState'); if (el.textContent !== t) el.textContent = t; }
   function markDirty() {
     clearTimeout(dirtyT);
-    $('saveState').textContent = 'Saving…';
+    $('saveState').classList.add('is-saving');
     dirtyT = setTimeout(autosave, 500);
   }
+  // leaving or hiding the tab writes what is still waiting
+  function flushSave() { if (dirtyT) { clearTimeout(dirtyT); autosave(); } }
+  window.addEventListener('pagehide', flushSave);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushSave(); });
   function projectData() {
     var shape = {}, chains = {};
     SHAPE_KEYS.forEach(function (k) { shape[k] = state[k]; });
@@ -1599,10 +2383,12 @@
     };
   }
   function autosave() {
+    dirtyT = null;
+    $('saveState').classList.remove('is-saving');
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(projectData()));
-      $('saveState').textContent = 'Saved in browser';
-    } catch (e) { $('saveState').textContent = 'Not saved'; }
+      sayState('Saved in browser');
+    } catch (e) { sayState('Not saved'); }
   }
   function num(v, lo, hi, d) { v = +v; return isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; }
   function validFlat(f) {
@@ -1628,7 +2414,8 @@
   // Ranges are the sliders' own, so a hand-edited or hostile file can't push
   // the engine somewhere it never goes (smooth 100 froze the tab, res < 0
   // blanked every glyph).
-  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3] };
+  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3],
+    flow: [0, 1], warp: [0, 1], neck: [0, 1], sag: [0, 1], drip: [0, 1], dripForm: [0, 1], stretch: [1, 3] };
   // Validate everything into a staging object first; nothing is touched
   // unless the whole file passes, so a rejected Open leaves no trace.
   function parseProject(p) {
@@ -1672,9 +2459,12 @@
     q.globalExempt = Object.create(null);
     if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (hasB(k)) q.globalExempt[k] = true; });
     if (Array.isArray(p.blocks)) {
-      var budget = 20000;   // total preview text: a 200k-character file would freeze the tab
-      q.blocks = p.blocks.slice(0, 40).map(function (b) {
-        var t = String((b && b.text) || '').slice(0, Math.max(0, Math.min(5000, budget)));
+      // total preview text: a 200k-character file would freeze the tab.
+      // The same caps the editor keeps to (BLOCK_MAX, TEXT_BUDGET +
+      // FIXED_SLACK, MAX_BLOCKS), so an autosave always comes back whole.
+      var budget = TEXT_BUDGET + FIXED_SLACK;
+      q.blocks = p.blocks.slice(0, MAX_BLOCKS).map(function (b) {
+        var t = String((b && b.text) || '').replace(/\r\n?/g, '\n').slice(0, Math.max(0, Math.min(BLOCK_MAX, budget)));
         budget -= t.length;
         return block(t, num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
       });
@@ -1730,31 +2520,16 @@
   });
 
   // ----------------------------------------------------------------- exports
-  // Lay a block out the same way the preview does: em-sized glyphs, measured
-  // spacing, kerning, tracking, word wrap at maxW. Returns placed glyphs.
+  // A block laid out exactly as its preview is (layoutText: same clusters,
+  // spacing, kerning, tracking, spaces and line breaks), wrapped at maxW.
+  // the preview's own layout and fit rule, at the export's column width
   function layoutBlock(b, maxW) {
-    var k = b.size / MET.em, trk = b.tr * b.size, space = wordEm() * b.size + trk;
-    var lines = [[]], x = 0, lineW = [0];
-    b.text.split(/\s+/).forEach(function (chunk) {
-      if (!chunk) return;
-      var word = [], wx = 0, prev = null;
-      GC.clusters(chunk).forEach(function (L) {
-        if (!canDraw(L)) {   // the same dashed box the preview shows
-          if (prev || word.length) wx += trk;
-          word.push({ notdef: true, x: wx, w: 0.42 * b.size });
-          wx += 0.42 * b.size; prev = null; return;
-        }
-        if (prev) wx += kernOf(prev, L) * k + trk;
-        var s = spacingOf(L);
-        word.push({ L: L, x: wx, s: s });
-        wx += s.adv * k; prev = L;
-      });
-      if (!word.length) return;
-      if (x > 0 && x + wx > maxW) { lines.push([]); lineW.push(0); x = 0; }
-      word.forEach(function (g) { g.x += x; lines[lines.length - 1].push(g); });
-      x += wx; lineW[lineW.length - 1] = x; x += space;
-    });
-    return { lines: lines, widths: lineW, k: k };
+    var lay = layoutText(b.text, b.size, b.tr, maxW, true);
+    return {
+      lines: lay.lines.map(function (l) { return l.glyphs; }),
+      widths: lay.lines.map(function (l) { return l.w; }),
+      k: lay.k, size: lay.size,
+    };
   }
   // The whole specimen as one SVG: every block in its own size, leading,
   // tracking and ink/paper colours, glyphs referenced from shared defs.
@@ -1763,18 +2538,18 @@
     var bg = state.ink === '#000000' ? '#ffffff' : '#000000';
     var blocks = state.blocks.length ? state.blocks : [block(state.fontName.toUpperCase(), 160, 110, 0.01)];
     blocks.forEach(function (b) {
-      var lay = layoutBlock(b, inner), lh = b.lh / 100 * b.size, top = y;
-      var h = pad * 0.6 + (ASC_EM - CAP_EM) * b.size + lay.lines.length * lh + DESC_EM * b.size + pad * 0.6;
+      var lay = layoutBlock(b, inner), sz = lay.size, lh = b.lh / 100 * sz, top = y;
+      var h = pad * 0.6 + (ASC_EM - CAP_EM) * sz + lay.lines.length * lh + DESC_EM * sz + pad * 0.6;
       var ink = b.paper ? '#000000' : (state.ink === '#000000' ? '#000' : state.ink);
       if (b.paper) body += '<rect x="0" y="' + top.toFixed(1) + '" width="' + W + '" height="' + h.toFixed(1) + '" fill="#ffffff"/>';
-      var baseline = top + pad * 0.6 + (ASC_EM - CAP_EM) * b.size + CAP_EM * b.size + (lh - b.size) / 2;
+      var baseline = top + pad * 0.6 + (ASC_EM - CAP_EM) * sz + CAP_EM * sz + (lh - sz) / 2;
       body += '<g fill="' + ink + '">';
       lay.lines.forEach(function (line, li) {
         var by = baseline + li * lh;
         line.forEach(function (g) {
           if (g.notdef) {
-            body += '<rect x="' + (pad + g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - CAP_EM * b.size).toFixed(1) + '" width="' + (g.w * 0.8).toFixed(1) +
-              '" height="' + (CAP_EM * b.size).toFixed(1) + '" rx="3" fill="none" stroke="' + ink + '" stroke-width="2" stroke-dasharray="6 4"/>';
+            body += '<rect x="' + (pad + g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - CAP_EM * sz).toFixed(1) + '" width="' + (g.w * 0.8).toFixed(1) +
+              '" height="' + (CAP_EM * sz).toFixed(1) + '" rx="3" fill="none" stroke="' + ink + '" stroke-width="2" stroke-dasharray="6 4"/>';
             return;
           }
           used[g.L] = 1;
@@ -2008,7 +2783,18 @@
     kern: function (a, b) { return kernOf(a, b); },
     spacing: function (L) { var s = spacingOf(L); return { lsb: s.lsb, rsb: s.rsb, adv: s.adv, x0: s.x0, x1: s.x1 }; },
     metrics: function () { return { base: MET.base, cap: MET.cap, em: MET.em, ascender: ASC_EM, descender: DESC_EM }; },
+    // the text of each laid-out line, as the previews and exports break it
+    layout: function (text, size, maxW) {
+      text = String(text);
+      var l = layoutText(text, size || 100, 0, maxW || Infinity, true);
+      return l.lines.map(function (ln) { return text.slice(ln.o0, ln.o1); });
+    },
     glyphs: function () { return LETTERS.concat(VIET, LATIN); },
+    rings: function (L) { return ringsOf(L); },
+    // counters: rings wound against the outer shells (see ringsFromField), with their areas
+    holes: function (L) {
+      return ringsOf(L).map(BlobEngine.signedArea).filter(function (a) { return a < 0; }).map(function (a) { return -a; });
+    },
     // true 2D distance between the inks of a set pair, glyph units (tests)
     pairGap: function (a, b) {
       var A = spacingOf(a), B = spacingOf(b), shift = A.adv + kernOf(a, b) - (B.x0 - B.lsb) + (A.x0 - A.lsb);

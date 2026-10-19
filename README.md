@@ -12,9 +12,26 @@ automatic kerning.
 - `index.html` — the finished, single-file app (open this directly in a browser).
 - `app.js` — application state, UI wiring, glyph editor, exports.
 - `blob-engine.js` — metaball/SDF geometry engine (marching squares, contour
-  stitching, chain repair, Chaikin smoothing). Exposes `glyphRings` (the
-  hand-authored capsule/node field used by the Font tool) and the generic
-  `traceField` + `valueNoise` used by the Poster tool below.
+  stitching, chain repair, Chaikin smoothing). Exposes `glyphRings` /
+  `glyphTrace` (the hand-authored capsule/node field used by both tools) and
+  the generic `traceField` + `valueNoise` used by the Poster tool below.
+  The liquid terms make the letters flow rather than sit:
+  - **Flow** (slider): the field is read through a smooth, one-to-one domain
+    warp, so contours slide and undulate, and strokes bead and neck along
+    their length with a drop at each free end.
+  - **Drip** (slider, 0 = none): a few seeded drips — a flared neck and a
+    round drop — hang from free stem feet and bar tips, never under a bowl,
+    from a round, a mark, a dot or punctuation, or from a letter carrying a
+    mark below it. The baseline is measured from the drip-free foot
+    (`glyphTrace().foot`), so drips never move it.
+  - Per preset: `warp`, `neck`, `sag` (gravity: the lower part slides and
+    spreads), `dripForm` (fat and short to long and thin) and `stretch`
+    (surface noise running downward), so each Flow state keeps its
+    character at any slider value.
+  - Strokes meeting face to face pool into their joints; strokes facing
+    across a gap melt only by a share of it, so counters stay open. Beads
+    are capped by the room around them and the Lipschitz bound covers every
+    term, so coarse sampling never misses a contour.
 - `glyph-compose.js` — diacritic composition shared by both tools: splits text
   into clusters (NFC/NFD, lowercase), decomposes accented letters into a base
   glyph plus mark glyphs and places the marks (Vietnamese stacking rules).
@@ -40,7 +57,7 @@ automatic kerning.
   **Typeface** — either the built-in Liquid glyph set or an uploaded font
   (`.ttf`/`.otf`/`.woff`, parsed with opentype.js). For the built-in set the
   letterforms themselves are adjustable here: the Font tool's flow-state
-  presets plus Mass / Melt / Tension / Wobble feed `BlobEngine.glyphRings`,
+  presets plus Mass / Melt / Tension / Wobble / Flow / Drip feed `BlobEngine.glyphRings`,
   so the whole alphabet can be reshaped without leaving the poster. Per-glyph
   node editing lives in the Font tool, and its edits come across: when the
   Font tool has saved a project in this browser, *Use my Font-tool glyphs*
@@ -160,6 +177,62 @@ Keyboard: Ctrl/⌘Z undo, Shift+Ctrl/⌘Z redo, Ctrl/⌘S save, `[` `]` previous
 next glyph, Tab (canvas focused) cycles nodes, arrows nudge (Shift ×10),
 Alt+arrows swell/pinch, Delete removes a node, Esc deselects. `Keys` in the
 topbar lists them.
+
+## Preview text
+
+The preview blocks are live text: click or tap anywhere in one (or Tab to it)
+and type — there is no separate text box. The caret is a thin bar in the
+block's ink, cap-height tall; it blinks, and holds still with reduced motion.
+Arrow keys move letter by letter (an accented letter is one step: the caret
+never lands between a letter and its marks), Up/Down and Home/End follow the
+lines as they are drawn, Shift extends the selection, a drag selects, a
+double-click selects a word and Ctrl/⌘A the whole block; a drag held at the
+top or bottom edge scrolls. Right-click gives the usual Cut / Copy / Paste on
+the selection. Enter starts a new line. Esc (or Ctrl/⌘ Enter) leaves the text
+for the block itself — Tab then moves on to its controls, Enter goes back in —
+and a click outside leaves it too; while a preview has focus the editor
+shortcuts above stay out of the way (Ctrl/⌘S still saves).
+
+Keys go to an invisible native textarea kept at the caret, so IME composition
+(Vietnamese Telex / VNI, macOS Vietnamese, dead keys, mobile keyboards),
+paste and screen readers all work as in any text field. Undo is the app's:
+each typing burst — the first edit after focusing, after a pause or after
+moving the caret; each paste or cut — is one Ctrl/⌘Z step, on the same stack
+as glyph edits; typing over a selection (after Ctrl/⌘A, a drag) starts a new
+step too. An undo that brings a block back or removes one keeps the caret in
+the block you were typing in (blocks keep a stable id), and an undo of typing
+leaves focus where it was; if the undo takes away the very block you were
+typing in, focus moves to the nearest remaining block (the block, not its
+text, so the next key changes nothing). Each preview's text field is labelled
+with its position and size for screen readers. A block holds up to 5,000
+characters and all blocks together 20,000; Add block and the proofs may add
+their short strings on top (up to 2,000 more) and there are at most 40
+blocks — exactly what a project file and the autosave keep, so everything
+comes back after a reload. The project autosaves half a second after you
+stop, and at once when the tab is hidden or closed; the save status only
+speaks (to a screen reader) when a save settles, and shows a dot while one is
+pending.
+
+Spaces are never collapsed: every space (or tab) is one word space, so two
+spaces show as two; `\n` is a hard line break. Lines wrap between words, and
+the one space where a line wraps hangs past the right edge; more spaces than
+that flow on to the next line (as CSS `break-spaces` does), so every space you
+type at the edge, or on a line of nothing but spaces, moves the caret. A word
+wider than the column shrinks the block to fit, down to 8px; one still too
+wide breaks between letters. Every block keeps room above its first line for
+the font's ascender (its tallest stacked Vietnamese capital), as a line box
+keeps a font's ascent and as the export does, so typing an accent never moves
+the text. An emoji, flag or ZWJ sequence the font can't draw is one dashed box
+and one caret step. The SVG / PNG specimen exports use this same layout and
+fit rule, line breaks included.
+
+The selection and the empty-block placeholder take their colours from the ink
+and the ground by the WCAG contrast formula: the selection stands at least 3:1
+off the ground with the ink at least 3:1 on it (on the grey ink that makes it a
+light band under the letters), and the placeholder at least 3:1 off the ground,
+on every ink swatch and on paper. In Windows High Contrast (forced colours)
+the caret and focus rule are drawn in the system text colour and the selection
+in the system highlight.
 
 ## Vietnamese and diacritics
 

@@ -92,6 +92,13 @@ html, body {
 .project-group { display: flex; gap: 6px; }
 .project-group .text-btn { padding: 6px 9px; }
 .save-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* unsaved work: a dot before the label (drawn, never read out — the live
+   region's text only changes once a save settles, app.js markDirty) */
+.save-state::before {
+  content: ''; display: inline-block; width: 0; height: 0; margin: 0 7px 1px 0; vertical-align: middle;
+  border: 2.5px solid currentColor; border-radius: 50%; opacity: 0; transition: opacity var(--t) var(--ease);
+}
+.save-state.is-saving::before { opacity: 1; }
 .fontname-input:hover, .fontname-input:focus { background: #1b1b1b; }
 .topbar-spacer { flex: 1; }
 .topbar-meta {
@@ -257,30 +264,77 @@ html, body {
 }
 .mini-btn:hover { color: var(--fg); border-color: #8f8f8f; }
 
+.tester { cursor: text; }   /* anywhere below a block's controls places the caret */
+.tester-head { cursor: default; }
 .tester-body { padding: 26px 26px 0 26px; }
-.tester-text { cursor: text; min-height: 1em; overflow-wrap: anywhere; }
-.tester-text:focus-visible { outline-offset: 6px; }
-.tester-text .word { display: inline-block; white-space: nowrap; }
-.tester-text svg { display: inline-block; overflow: visible; }
-.tester-text svg.notdef { stroke: currentColor; stroke-dasharray: 4 3; vertical-align: baseline; }
+/* Live preview text: the glyphs are one SVG drawn from the shared defs; the
+   keys go to an invisible textarea parked at the caret (app.js makeEditor).
+   Caret, selection and focus are all the block's own ink (currentColor), so
+   they read the same on black and on paper. */
+.tester-text { position: relative; }
+.tester-glyphs { display: block; width: 100%; overflow: visible; }
+/* --sel-c / --ph-a are worked out from the ink and the ground (app.js
+   inkTones): the selection >= 3:1 off the ground with the ink >= 3:1 on it,
+   the placeholder >= 3:1 off the ground, on every ink swatch and on paper */
+.tester-text { --sel-c: #5b5b5b; --ph-a: 0.36; }
+.tester-ink.is-ph { opacity: var(--ph-a); }
+.tester-ink .notdef { stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.tester-sel rect { fill: var(--sel-c); }
+.tester-sel rect.comp { fill: currentColor; opacity: 0.75; }
+/* focus: a hairline of ink draws down the left edge of the text */
+.tester-text::before {
+  content: ''; position: absolute; left: -12px; top: 0; bottom: 0; width: 1px;
+  background: currentColor; transform: scaleY(0); transform-origin: 50% 0;
+  transition: transform var(--t) var(--ease);
+}
+.tester-text.is-focused::before { transform: scaleY(1); }
+/* a 1px halo of the block's ground keeps the caret off neighbouring strokes */
+.tester-caret {
+  position: absolute; left: 0; top: 0; width: 2px; height: 0;
+  background: currentColor; pointer-events: none; visibility: hidden;
+  box-shadow: 0 0 0 1px var(--bg);
+}
+.tester.paper .tester-caret { box-shadow: 0 0 0 1px #fff; }
+/* solid while it moves, then a hard blink; solid under reduced motion */
+.tester-text.is-focused .tester-caret.on { visibility: visible; animation: tester-blink-a 1.06s step-end infinite; }
+@keyframes tester-blink-a { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes tester-blink-b { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+/* 16px so iOS doesn't zoom on focus; focusable, never seen */
+.tester-input {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden;
+  font: 16px/1 var(--mono); white-space: pre;
+  opacity: 0; color: transparent; background: transparent; caret-color: transparent;
+  pointer-events: none;
+}
+/* under the pointer for a right-click, so the menu is the textarea's own */
+.tester-input.is-ctx { width: 24px; height: 24px; pointer-events: auto; z-index: 2; }
+/* after Esc the block itself holds focus: an inset hairline, not a box */
+.tester:focus { outline: none; }
+.tester:focus-visible { outline: 1px solid var(--hi); outline-offset: -1px; }
+.tester.paper:focus-visible { outline-color: #000; }
+/* Windows High Contrast: forced colours paint backgrounds as Canvas, which
+   would hide the caret and the focus hairline; draw them in the system
+   text colour, the selection in Highlight */
+@media (forced-colors: active) {
+  .tester-caret, .tester-text::before { forced-color-adjust: none; background: CanvasText; box-shadow: none; }
+  .tester-text::before { width: 2px; }
+  .tester-sel { forced-color-adjust: none; }
+  .tester-sel rect { fill: Highlight; opacity: 0.5; }
+  .tester-sel rect.comp { fill: CanvasText; opacity: 1; }
+  .tester-ink.is-ph { forced-color-adjust: none; fill: GrayText; opacity: 1; }
+  .tester:focus-visible { outline-color: CanvasText; }
+}
 .empty-state {
   padding: 60px 26px; font-family: var(--mono); font-size: var(--fs-s); color: var(--muted);
   border-bottom: 1px solid var(--line);
 }
-.tester-edit {
-  width: 100%; background: #141414; color: var(--fg);
-  border: 1px solid var(--hi); border-radius: 2px;
-  font-family: var(--mono); font-size: 13px; line-height: 1.6;
-  padding: 12px; resize: vertical; min-height: 90px; outline: none;
-}
-.tester.paper .tester-edit { background: #f4f4f4; color: #000; }
 .tester.paper input[type="range"]::-webkit-slider-runnable-track { background: #9a9a9a; }
 .tester.paper input[type="range"]::-moz-range-track { background: #9a9a9a; }
 .tester.paper input[type="range"]::-webkit-slider-thumb { background: #111; }
 .tester.paper input[type="range"]::-moz-range-thumb { background: #111; }
 .tester.paper .mini-btn { border-color: #8a8a8a; color: #333; --wipe: #000; }
 .tester.paper .mini-btn.on { color: #fff; border-color: #000; }
-.tester.paper .tester-edit { border-color: #000; }
 
 .add-block-row { padding: 22px 26px 40px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .proof-select { font-family: var(--mono); font-size: var(--fs-xs); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; min-width: 0; padding: 5px 8px; color: var(--muted); }
@@ -317,16 +371,16 @@ html, body {
 /* ---------------------------------------------------------------- controls */
 .control-bar {
   border-top: 1px solid var(--line); background: var(--surface);
-  padding: 12px 18px; display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  padding: 12px 18px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
 }
-.slider-group { display: flex; flex-direction: column; gap: 5px; width: 80px; }
-.control-cluster { display: flex; gap: 14px; align-items: flex-end; }
+.slider-group { display: flex; flex-direction: column; gap: 5px; width: 72px; }
+.control-cluster { display: flex; gap: 12px; align-items: flex-end; }
 .slider-group label {
-  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--muted);
-  display: flex; justify-content: space-between;
+  display: flex; justify-content: space-between; gap: 4px; white-space: nowrap;
 }
-.slider-group label b { color: var(--fg); font-weight: 600; }
+.slider-group label b { color: var(--fg); font-weight: 600; letter-spacing: 0; }
 
 input[type="range"] {
   -webkit-appearance: none; appearance: none;

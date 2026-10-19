@@ -102,6 +102,13 @@ html, body {
 .project-group { display: flex; gap: 6px; }
 .project-group .text-btn { padding: 6px 9px; }
 .save-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* unsaved work: a dot before the label (drawn, never read out — the live
+   region's text only changes once a save settles, app.js markDirty) */
+.save-state::before {
+  content: ''; display: inline-block; width: 0; height: 0; margin: 0 7px 1px 0; vertical-align: middle;
+  border: 2.5px solid currentColor; border-radius: 50%; opacity: 0; transition: opacity var(--t) var(--ease);
+}
+.save-state.is-saving::before { opacity: 1; }
 .fontname-input:hover, .fontname-input:focus { background: #1b1b1b; }
 .topbar-spacer { flex: 1; }
 .topbar-meta {
@@ -267,30 +274,77 @@ html, body {
 }
 .mini-btn:hover { color: var(--fg); border-color: #8f8f8f; }
 
+.tester { cursor: text; }   /* anywhere below a block's controls places the caret */
+.tester-head { cursor: default; }
 .tester-body { padding: 26px 26px 0 26px; }
-.tester-text { cursor: text; min-height: 1em; overflow-wrap: anywhere; }
-.tester-text:focus-visible { outline-offset: 6px; }
-.tester-text .word { display: inline-block; white-space: nowrap; }
-.tester-text svg { display: inline-block; overflow: visible; }
-.tester-text svg.notdef { stroke: currentColor; stroke-dasharray: 4 3; vertical-align: baseline; }
+/* Live preview text: the glyphs are one SVG drawn from the shared defs; the
+   keys go to an invisible textarea parked at the caret (app.js makeEditor).
+   Caret, selection and focus are all the block's own ink (currentColor), so
+   they read the same on black and on paper. */
+.tester-text { position: relative; }
+.tester-glyphs { display: block; width: 100%; overflow: visible; }
+/* --sel-c / --ph-a are worked out from the ink and the ground (app.js
+   inkTones): the selection >= 3:1 off the ground with the ink >= 3:1 on it,
+   the placeholder >= 3:1 off the ground, on every ink swatch and on paper */
+.tester-text { --sel-c: #5b5b5b; --ph-a: 0.36; }
+.tester-ink.is-ph { opacity: var(--ph-a); }
+.tester-ink .notdef { stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.tester-sel rect { fill: var(--sel-c); }
+.tester-sel rect.comp { fill: currentColor; opacity: 0.75; }
+/* focus: a hairline of ink draws down the left edge of the text */
+.tester-text::before {
+  content: ''; position: absolute; left: -12px; top: 0; bottom: 0; width: 1px;
+  background: currentColor; transform: scaleY(0); transform-origin: 50% 0;
+  transition: transform var(--t) var(--ease);
+}
+.tester-text.is-focused::before { transform: scaleY(1); }
+/* a 1px halo of the block's ground keeps the caret off neighbouring strokes */
+.tester-caret {
+  position: absolute; left: 0; top: 0; width: 2px; height: 0;
+  background: currentColor; pointer-events: none; visibility: hidden;
+  box-shadow: 0 0 0 1px var(--bg);
+}
+.tester.paper .tester-caret { box-shadow: 0 0 0 1px #fff; }
+/* solid while it moves, then a hard blink; solid under reduced motion */
+.tester-text.is-focused .tester-caret.on { visibility: visible; animation: tester-blink-a 1.06s step-end infinite; }
+@keyframes tester-blink-a { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes tester-blink-b { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+/* 16px so iOS doesn't zoom on focus; focusable, never seen */
+.tester-input {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden;
+  font: 16px/1 var(--mono); white-space: pre;
+  opacity: 0; color: transparent; background: transparent; caret-color: transparent;
+  pointer-events: none;
+}
+/* under the pointer for a right-click, so the menu is the textarea's own */
+.tester-input.is-ctx { width: 24px; height: 24px; pointer-events: auto; z-index: 2; }
+/* after Esc the block itself holds focus: an inset hairline, not a box */
+.tester:focus { outline: none; }
+.tester:focus-visible { outline: 1px solid var(--hi); outline-offset: -1px; }
+.tester.paper:focus-visible { outline-color: #000; }
+/* Windows High Contrast: forced colours paint backgrounds as Canvas, which
+   would hide the caret and the focus hairline; draw them in the system
+   text colour, the selection in Highlight */
+@media (forced-colors: active) {
+  .tester-caret, .tester-text::before { forced-color-adjust: none; background: CanvasText; box-shadow: none; }
+  .tester-text::before { width: 2px; }
+  .tester-sel { forced-color-adjust: none; }
+  .tester-sel rect { fill: Highlight; opacity: 0.5; }
+  .tester-sel rect.comp { fill: CanvasText; opacity: 1; }
+  .tester-ink.is-ph { forced-color-adjust: none; fill: GrayText; opacity: 1; }
+  .tester:focus-visible { outline-color: CanvasText; }
+}
 .empty-state {
   padding: 60px 26px; font-family: var(--mono); font-size: var(--fs-s); color: var(--muted);
   border-bottom: 1px solid var(--line);
 }
-.tester-edit {
-  width: 100%; background: #141414; color: var(--fg);
-  border: 1px solid var(--hi); border-radius: 2px;
-  font-family: var(--mono); font-size: 13px; line-height: 1.6;
-  padding: 12px; resize: vertical; min-height: 90px; outline: none;
-}
-.tester.paper .tester-edit { background: #f4f4f4; color: #000; }
 .tester.paper input[type="range"]::-webkit-slider-runnable-track { background: #9a9a9a; }
 .tester.paper input[type="range"]::-moz-range-track { background: #9a9a9a; }
 .tester.paper input[type="range"]::-webkit-slider-thumb { background: #111; }
 .tester.paper input[type="range"]::-moz-range-thumb { background: #111; }
 .tester.paper .mini-btn { border-color: #8a8a8a; color: #333; --wipe: #000; }
 .tester.paper .mini-btn.on { color: #fff; border-color: #000; }
-.tester.paper .tester-edit { border-color: #000; }
 
 .add-block-row { padding: 22px 26px 40px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .proof-select { font-family: var(--mono); font-size: var(--fs-xs); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; min-width: 0; padding: 5px 8px; color: var(--muted); }
@@ -327,16 +381,16 @@ html, body {
 /* ---------------------------------------------------------------- controls */
 .control-bar {
   border-top: 1px solid var(--line); background: var(--surface);
-  padding: 12px 18px; display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  padding: 12px 18px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
 }
-.slider-group { display: flex; flex-direction: column; gap: 5px; width: 80px; }
-.control-cluster { display: flex; gap: 14px; align-items: flex-end; }
+.slider-group { display: flex; flex-direction: column; gap: 5px; width: 72px; }
+.control-cluster { display: flex; gap: 12px; align-items: flex-end; }
 .slider-group label {
-  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--muted);
-  display: flex; justify-content: space-between;
+  display: flex; justify-content: space-between; gap: 4px; white-space: nowrap;
 }
-.slider-group label b { color: var(--fg); font-weight: 600; }
+.slider-group label b { color: var(--fg); font-weight: 600; letter-spacing: 0; }
 
 input[type="range"] {
   -webkit-appearance: none; appearance: none;
@@ -720,6 +774,14 @@ select {
           <input type="range" id="sldWobble" min="0" max="8" step="0.1" />
         </div>
         <div class="slider-group">
+          <label for="sldFlow" title="How much the surface flows: a sliding contour, beads and necks along the strokes">Flow <b id="valFlow"></b></label>
+          <input type="range" id="sldFlow" min="0" max="1" step="0.05" />
+        </div>
+        <div class="slider-group">
+          <label for="sldDrip" title="A few seeded drips from free stem feet and bar tips (0 = none)">Drip <b id="valDrip"></b></label>
+          <input type="range" id="sldDrip" min="0" max="1" step="0.05" />
+        </div>
+        <div class="slider-group">
           <label for="sldSmooth">Smooth <b id="valSmooth"></b></label>
           <input type="range" id="sldSmooth" min="0" max="4" step="1" />
         </div>
@@ -791,7 +853,10 @@ select {
       <dt>Arrows · Shift arrows</dt><dd>Move node 1 · 10 units</dd>
       <dt>Alt arrows</dt><dd>Swell · pinch the node</dd>
       <dt>Delete · Esc</dt><dd>Remove node · deselect</dd>
-      <dt>Ctrl/⌘ Enter</dt><dd>Finish editing preview text</dd>
+      <dt>Click a preview · Tab to it</dt><dd>Type straight into it — Enter: new line</dd>
+      <dt>Arrows · Home / End (preview)</dt><dd>Letter by letter, line by line as drawn (Shift: select)</dd>
+      <dt>Esc · Ctrl/⌘ Enter (preview)</dt><dd>Leave the text; the shortcuts above work again — Enter goes back in</dd>
+      <dt>Right-click (preview)</dt><dd>Cut · Copy · Paste the selection</dd>
     </dl>
   </dialog>
 
@@ -834,6 +899,23 @@ select {
 // strokes are combined with a polynomial smooth-minimum, which makes the mass
 // pool into the joints where strokes meet, exactly like a viscous liquid.
 //
+// Liquid terms make it flow rather than sit (all 0 = the plain field). Two
+// are sliders, the rest ride with the Flow preset:
+//  - flow (slider, 0-1): how much the surface moves. It scales
+//      warp (preset): the whole field is read through a smooth,
+//        low-frequency domain warp, so contours slide instead of fizzing;
+//      neck (preset): strokes bead and neck along their length
+//        (Plateau-Rayleigh), with a drop at free stroke ends (neckLattice);
+//  - sag (preset): gravity -- the lower part of a glyph slides down and
+//    spreads, low beads are fuller, strokes hang fuller near the foot;
+//  - drip (slider, 0 = none): a few seeded drips from free stem feet and bar
+//    tips (planDrips), shaped by dripForm (preset: 0 fat and short, 1 long
+//    and thin); stretch (preset) runs the surface noise downward.
+// None of them can clot a counter: beads are capped by the room around them,
+// the warp is kept one-to-one, and drips only hang where they clear all
+// other ink. Strokes that meet face to face pool into their joints, and two
+// strokes facing across a gap melt only by a share of that gap.
+//
 // The resulting scalar field is contoured with marching squares and then
 // Chaikin-smoothed, so every edge comes out round -- there are no straight
 // lines or corners anywhere in the output by construction.
@@ -858,19 +940,45 @@ select {
     var c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
     return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
   }
+  // A second lattice noise for the flow terms, with a full-range integer hash
+  // (uniform in [0, 1)). With smoothstep interpolation its gradient is at
+  // most 1.5 per lattice unit, which the Lipschitz bound in glyphRings uses.
+  function hashU(ix, iy, seed) {
+    var h = Math.imul(ix | 0, 0x27d4eb2d) ^ Math.imul(iy | 0, 0x165667b1) ^ Math.imul(seed | 0, 0x9e3779b1);
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function flowNoise(x, y, seed) {
+    var ix = Math.floor(x), iy = Math.floor(y);
+    var fx = x - ix, fy = y - iy;
+    var ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    var a = hashU(ix, iy, seed), b = hashU(ix + 1, iy, seed);
+    var c = hashU(ix, iy + 1, seed), d = hashU(ix + 1, iy + 1, seed);
+    return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+  }
 
   // ------------------------------------------------------------------ sdf
   // ------------------------------------------------------------ presets
-  // The Flow states, shared by the Font tool and the Poster tool. Melt is
-  // capped per point (see makeField), so counters stay open even when the
-  // mass is allowed to pool heavily at the joints.
+  // The Flow states, shared by the Font tool and the Poster tool (the single
+  // source of truth; both tools only keep a fallback copy). Melt is capped
+  // per point (see makeField), so counters stay open even when the mass is
+  // allowed to pool heavily at the joints. flow and drip are sliders; warp,
+  // neck, sag, dripForm and stretch are the preset's own physics, so each
+  // state keeps its character at any slider value.
   var PRESETS = {
-    liquid:  { mass: 0.98, melt: 14, tension: -4,   wobble: 1.1, grain: 0.038, smooth: 2, res: 1.6 },
-    mercury: { mass: 1.02, melt: 24, tension: -2.5, wobble: 0,   grain: 0.045, smooth: 3, res: 1.6 },
-    acid:    { mass: 0.98, melt: 16, tension: -3.5, wobble: 3.0, grain: 0.075, smooth: 3, res: 1.5 },
-    molten:  { mass: 1.08, melt: 19, tension: -1.5, wobble: 1.4, grain: 0.035, smooth: 3, res: 1.6 },
-    bubble:  { mass: 1.12, melt: 9,  tension: -2,   wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
-    goo:     { mass: 1.02, melt: 18, tension: -2.5, wobble: 3.8, grain: 0.06,  smooth: 3, res: 1.5 },
+    liquid:  { mass: 1.00, melt: 18, tension: -4,   wobble: 0.6, grain: 0.038, smooth: 2, res: 1.6,
+               flow: 0.70, warp: 0.80, neck: 0.70, sag: 0.50, drip: 0.30, dripForm: 0.40, stretch: 1.2 },
+    mercury: { mass: 1.02, melt: 22, tension: -2.5, wobble: 0,   grain: 0.045, smooth: 3, res: 1.6,
+               flow: 0.75, warp: 0.25, neck: 1.00, sag: 0.15, drip: 0,    dripForm: 0.20, stretch: 1.0 },
+    acid:    { mass: 0.98, melt: 15, tension: -3.5, wobble: 3.4, grain: 0.09,  smooth: 3, res: 1.5,
+               flow: 0.85, warp: 0.90, neck: 0.30, sag: 0.30, drip: 0,    dripForm: 0.60, stretch: 1.0 },
+    molten:  { mass: 1.14, melt: 24, tension: -1,   wobble: 0.6, grain: 0.035, smooth: 3, res: 1.6,
+               flow: 0.50, warp: 0.60, neck: 0.60, sag: 1.00, drip: 0.35, dripForm: 0.10, stretch: 1.3 },
+    bubble:  { mass: 1.14, melt: 10, tension: -1.5, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6,
+               flow: 0.40, warp: 0.50, neck: 0.90, sag: 0.10, drip: 0,    dripForm: 0.20, stretch: 1.0 },
+    goo:     { mass: 1.04, melt: 20, tension: -2.5, wobble: 2.6, grain: 0.06,  smooth: 3, res: 1.5,
+               flow: 0.80, warp: 0.75, neck: 0.70, sag: 0.80, drip: 0.55, dripForm: 0.90, stretch: 2.2 },
   };
 
   // ------------------------------------------------------------- skeleton
@@ -886,7 +994,12 @@ select {
   // each other with the smooth-min. A chain whose first node carries a 4th
   // element 1 ([x, y, r, 1]) starts a new GROUP: groups never melt together
   // (hard union), which keeps the dot of ! ? ; : off its stem.
-  var STRIDE = 8;                         // ax ay ra bx by rb piece group
+  //
+  // Each capsule also carries the arc length of its ends along its chain
+  // (sa sb) and the chain's index, so the stroke can neck and swell along
+  // its length (see neckLattice); out.chains lists each chain's capsules,
+  // its group and whether it is a drip.
+  var STRIDE = 11;                        // ax ay ra bx by rb piece group sa sb chain
   var CORNER_LO = 60 * Math.PI / 180;     // turn below this: fully smooth
   var CORNER_HI = 90 * Math.PI / 180;     // turn above this: a hard corner
   var SUB_ANGLE = 11 * Math.PI / 180;     // max tangent turn per sub-span
@@ -915,13 +1028,21 @@ select {
   }
 
   function buildSkeleton(chains, mass) {
-    var out = [];
-    var piece = -1, group = 0;
-    function push(a, b) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], piece, group); }
+    var out = [], info = [];
+    var piece = -1, group = 0, arc = 0, cid = 0;
+    function push(a, b) {
+      var l = Math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]));
+      out.push(a[0], a[1], a[2], b[0], b[1], b[2], piece, group, arc, arc + l, cid);
+      arc += l;
+    }
+    out.chains = info;
     for (var c = 0; c < chains.length; c++) {
       var ch = chains[c];
       if (!ch || !ch.length) continue;
+      cid = info.length; arc = 0;
       if (ch[0].length > 3 && ch[0][3] === 1 && out.length) group++;
+      // drip chains (planDrips) are flagged on the chain array itself
+      info.push({ c0: out.length / STRIDE, c1: 0, len: 0, closed: false, group: group, drip: !!ch.drip });
       // scaled copy, consecutive duplicates collapsed
       var pts = [];
       for (var q = 0; q < ch.length; q++) {
@@ -935,7 +1056,7 @@ select {
       if (pts.length === 1) { push(pts[0], pts[0]); continue; }
       var n = pts.length;
       var closed = n >= 4 && Math.abs(pts[0][0] - pts[n - 1][0]) < 0.5 && Math.abs(pts[0][1] - pts[n - 1][1]) < 0.5;
-      if (closed) { pts.pop(); n--; }
+      if (closed) { pts.pop(); n--; info[cid].closed = true; }
       var w = new Array(n);
       for (var i = 0; i < n; i++) {
         if (!closed && (i === 0 || i === n - 1)) w[i] = 1;
@@ -995,7 +1116,203 @@ select {
         }
       }
     }
+    for (var ii = 0; ii < info.length; ii++) {
+      info[ii].c1 = ii + 1 < info.length ? info[ii + 1].c0 : out.length / STRIDE;
+      info[ii].len = info[ii].c1 > info[ii].c0 ? out[(info[ii].c1 - 1) * STRIDE + 9] : 0;
+    }
     return out;
+  }
+
+  // ------------------------------------------------------- necking / beads
+  // A liquid thread doesn't keep one thickness: surface tension pulls it
+  // into beads joined by thinner necks (the Plateau-Rayleigh instability).
+  // Each chain gets a 1D lattice along its arc length whose points alternate
+  // bulge / neck with seeded random strength; the radius is scaled by
+  // 1 + m(s), m smoothstep-interpolated between lattice points (C1, so the
+  // contour stays smooth). Open chains get an even number of cells, so both
+  // terminals land on a bulge (a drop at every stroke end, and a pooled bead
+  // where a stroke runs into another); loops get an even count that wraps.
+  // Gravity (sag) makes the low beads fuller and the high necks thinner.
+  //
+  // A bead may only take a share (BEAD_ROOM) of the gap between its stroke
+  // and the nearest other stroke, less the part of that gap the melt
+  // bridges anyway (the smooth-min fuses surfaces closer than melt / 2): so
+  // beads swell freely on the outside of a letter but can't clot a counter
+  // or fuse two legs, and a stroke end buried in another stroke (the bar of
+  // H, the arms of E at the stem) gets no bead at all.
+  var NECK_WAVE = 25;     // glyph units from a bulge to the next neck
+  var CURVE_WAVE = 0.6;   // a round's wavelength is up to 1 + this longer
+  var INNER_CUT = 0.75;   // share of a bead/neck removed on a curve's inside
+  var CURVE_DAMP = 0.35;  // ... and on its outside (rounds keep gentle lobes)
+  var BEAD_ROOM = 0.4;
+  var TERMINAL_MAX = 0.35;  // a stroke-end drop swells at most this much
+  var TOP_END_DAMP = 0.6;   // an end pointing up keeps this share of its drop
+  function neckLattice(sk, bb, neck, sag, seed, melt) {
+    var bridge = 0.5 * (melt > 0 ? melt : 0) + 3;
+    var info = sk.chains || [], ncap = sk.length / STRIDE;
+    var U0 = new Float64Array(ncap), DU = new Float64Array(ncap), OFF = new Int32Array(ncap).fill(-1);
+    var val = [], apos = 0, slope = 0;
+    var top = bb[1], hh = Math.max(1e-6, bb[3] - bb[1]);
+    var grav = Math.min(0.8, 0.6 * sag);
+    // which side of each capsule is the inside of its curve (a counter, as
+    // a rule), and how much the stroke bends there (CW). On the inside beads
+    // and necks keep only 1 - INNER_CUT of their strength, on the outside
+    // 1 - CURVE_DAMP (see makeField), and a round chain beads more slowly.
+    var NX = new Float64Array(ncap), NY = new Float64Array(ncap), CW = new Float64Array(ncap);
+    for (var cc = 0; cc < info.length; cc++) {
+      var chn = info[cc], m0 = chn.c0, m1 = chn.c1, cnt = m1 - m0;
+      if (cnt < 2 || chn.drip) continue;
+      var raw = new Float64Array(cnt);
+      for (var a = m0; a < m1; a++) {
+        var oa = a * STRIDE, ux0 = sk[oa + 3] - sk[oa], uy0 = sk[oa + 4] - sk[oa + 1], ul = Math.hypot(ux0, uy0);
+        if (ul < 1e-9) continue;
+        ux0 /= ul; uy0 /= ul;
+        var turn = 0;
+        for (var side = -1; side <= 1; side += 2) {
+          var b = a + side;
+          if (b < m0 || b >= m1) { if (!chn.closed) continue; b = b < m0 ? m1 - 1 : m0; }
+          var ob2 = b * STRIDE;
+          if (sk[ob2 + 6] !== sk[oa + 6]) continue;           // across a corner: not a curve
+          var vx0 = sk[ob2 + 3] - sk[ob2], vy0 = sk[ob2 + 4] - sk[ob2 + 1], vl = Math.hypot(vx0, vy0);
+          if (vl < 1e-9) continue;
+          var cr = side < 0 ? (vx0 * uy0 - vy0 * ux0) / vl : (ux0 * vy0 - uy0 * vx0) / vl;
+          turn += Math.asin(Math.max(-1, Math.min(1, cr)));
+        }
+        raw[a - m0] = turn;
+        // inward normal: to the left of travel when the chain turns left
+        NX[a] = turn >= 0 ? -uy0 : uy0; NY[a] = turn >= 0 ? ux0 : -ux0;
+      }
+      for (var a2 = 0; a2 < cnt; a2++) {      // 1-2-1 smoothing along the chain
+        var pa = a2 > 0 ? raw[a2 - 1] : chn.closed ? raw[cnt - 1] : raw[a2];
+        var na = a2 < cnt - 1 ? raw[a2 + 1] : chn.closed ? raw[0] : raw[a2];
+        CW[m0 + a2] = Math.min(1, Math.abs(pa + 2 * raw[a2] + na) / 4 / (10 * Math.PI / 180));
+      }
+    }
+    // axis point, radius and height of chain ch at arc length s
+    function at(ch, s) {
+      var ci = ch.c0;
+      while (ci < ch.c1 - 1 && sk[ci * STRIDE + 9] < s) ci++;
+      var o = ci * STRIDE, sa = sk[o + 8], sb = sk[o + 9];
+      var u = sb > sa ? Math.max(0, Math.min(1, (s - sa) / (sb - sa))) : 0;
+      return [sk[o] + (sk[o + 3] - sk[o]) * u, sk[o + 1] + (sk[o + 4] - sk[o + 1]) * u, sk[o + 2] + (sk[o + 5] - sk[o + 2]) * u];
+    }
+    // surface gap from the stroke at p (radius r, chain c, arc s) to the
+    // nearest stroke that isn't this one's own neighbourhood (drips aside:
+    // the base glyph beads the same with Drip on or off)
+    function room(p, c, s, L, closed) {
+      var best = 1e9;
+      for (var q = 0; q < ncap; q++) {
+        var o = q * STRIDE;
+        if (sk[o + 10] === c) {
+          var ds = Math.abs((sk[o + 8] + sk[o + 9]) * 0.5 - s);
+          if (closed) ds = Math.min(ds, L - ds);
+          if (ds < 2.2 * (p[2] + sk[o + 2]) + 0.5 * (sk[o + 9] - sk[o + 8])) continue;
+        } else if (info[sk[o + 10]].drip) continue;
+        var bx = sk[o + 3] - sk[o], by = sk[o + 4] - sk[o + 1], l2 = bx * bx + by * by;
+        var t = l2 > 1e-9 ? ((p[0] - sk[o]) * bx + (p[1] - sk[o + 1]) * by) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        var gap = Math.hypot(p[0] - sk[o] - bx * t, p[1] - sk[o + 1] - by * t) - p[2] - (sk[o + 2] + (sk[o + 5] - sk[o + 2]) * t);
+        if (gap < best) best = gap;
+      }
+      return best;
+    }
+    // the outward direction's y at an open chain's end (e: 0 start, 1 end)
+    function endDy(ch, e) {
+      for (var q = e ? ch.c1 - 1 : ch.c0; q >= ch.c0 && q < ch.c1; q += e ? -1 : 1) {
+        var o = q * STRIDE, ex = sk[o + 3] - sk[o], ey = sk[o + 4] - sk[o + 1], el = Math.hypot(ex, ey);
+        if (el > 1e-6) return (e ? ey : -ey) / el;
+      }
+      return 0;
+    }
+    for (var c = 0; c < info.length; c++) {
+      var ch = info[c], L = ch.len;
+      if (ch.drip) continue;
+      var mcw = 0;
+      for (var qc = ch.c0; qc < ch.c1; qc++) mcw += CW[qc];
+      mcw = ch.c1 > ch.c0 ? mcw / (ch.c1 - ch.c0) : 0;
+      var wave = NECK_WAVE * (1 + CURVE_WAVE * mcw);
+      if (!(L > 0.9 * wave) || ch.c1 - ch.c0 < 1) continue;
+      var n = 2 * Math.round(L / (2 * wave));
+      if (n < 2) n = ch.closed ? 2 : 1;
+      var scale = n / L, off = val.length;
+      // loops neck more gently: their beads face their own counter
+      var amp = ch.closed ? neck * 0.6 : neck;
+      for (var i = 0; i <= n; i++) {
+        if (ch.closed && i === n) { val.push(val[off]); break; }
+        var s = i / scale, p = at(ch, s);
+        var vy = Math.max(0, Math.min(1, (p[1] - top) / hh));
+        var mag = 0.45 + 0.55 * hashU(i, c * 31 + 7, seed);
+        var v;
+        if (n === 1) v = 0.55 * mag * (1 + grav * (2 * vy - 1));              // short stroke: two soft drops
+        else if (i % 2 === 0) v = mag * (1 + grav * (2 * vy - 1));             // bead
+        else v = -mag * (1 + grav * (1 - 2 * vy));                             // neck
+        var m = amp * v;
+        if (!ch.closed && (i === 0 || i === n) && m > 0) {
+          // stroke-end drops: modest, and smaller on an end pointing up (the
+          // tops of V W Y, the arms of K), so terminals don't turn into pins
+          if (m > TERMINAL_MAX) m = TERMINAL_MAX;
+          if (endDy(ch, i === 0 ? 0 : 1) < -0.5) m *= TOP_END_DAMP;
+        }
+        if (m > 0 && p[2] > 1e-6) {
+          // the bead's reach: its own point and half a cell either side
+          var g = room(p, c, s, L, ch.closed), hs = 0.5 / scale;
+          if (s - hs > 0 || ch.closed) g = Math.min(g, room(at(ch, (s - hs + L) % L), c, (s - hs + L) % L, L, ch.closed));
+          if (s + hs < L || ch.closed) g = Math.min(g, room(at(ch, (s + hs) % L), c, (s + hs) % L, L, ch.closed));
+          var cap = Math.max(0, BEAD_ROOM * (g - bridge) / p[2]);
+          if (m > cap) m = cap;
+        }
+        m = m < -0.42 ? -0.42 : m > 0.6 ? 0.6 : m;
+        if (m > apos) apos = m;
+        val.push(m);
+      }
+      val.push(val[val.length - 1]);           // sentinel for u == n exactly
+      for (var q = ch.c0; q < ch.c1; q++) {
+        var o2 = q * STRIDE;
+        U0[q] = sk[o2 + 8] * scale; DU[q] = (sk[o2 + 9] - sk[o2 + 8]) * scale; OFF[q] = off;
+      }
+      ch.n = n;
+    }
+    var aabs = 0;
+    for (var vi = 0; vi < val.length; vi++) aabs = Math.max(aabs, Math.abs(val[vi]));
+    // the fullest bead on each capsule (for culling and the lazy test), and
+    // the steepest radius slope dr/ds of any capsule, for the Lipschitz
+    // bound: the taper (scaled by the fullest bead) plus the bead profile's
+    // own slope
+    var MP = new Float64Array(ncap);
+    for (var p2 = 0; p2 < ncap; p2++) {
+      if (OFF[p2] < 0) continue;
+      var o3 = p2 * STRIDE, l = sk[o3 + 9] - sk[o3 + 8];
+      var nn = info[sk[o3 + 10]].n, base = OFF[p2];
+      var k0 = Math.max(0, Math.floor(U0[p2])), k1 = Math.min(nn - 1, Math.floor(U0[p2] + DU[p2]));
+      var dmax = 0, mp = Math.max(0, val[base + k0]);
+      for (var k = k0; k <= k1; k++) {
+        dmax = Math.max(dmax, Math.abs(val[base + k + 1] - val[base + k]));
+        mp = Math.max(mp, val[base + k + 1]);
+      }
+      MP[p2] = mp;
+      if (l < 1e-6) continue;
+      var rmax = Math.max(sk[o3 + 2], sk[o3 + 5]);
+      var sl = Math.abs(sk[o3 + 5] - sk[o3 + 2]) / l * (1 + mp) + rmax * 1.5 * dmax * DU[p2] / l;
+      if (sl > slope) slope = sl;
+    }
+    return { U0: U0, DU: DU, OFF: OFF, MP: MP, VAL: new Float64Array(val), apos: apos, slope: slope,
+      NX: NX, NY: NY, CW: CW, aabs: aabs };
+  }
+  // The lattice of a drip-free skeleton, carried over to the same skeleton
+  // with nIns drip capsules inserted at capsule index `at`: they get no
+  // beads, so the base glyph beads exactly as it does with Drip off.
+  function shiftLattice(nk, at, nIns) {
+    var n1 = nk.OFF.length + nIns;
+    function mv(A, T) {
+      var B = new T(n1);
+      for (var i = 0; i < n1; i++) B[i] = i < at ? A[i] : i < at + nIns ? 0 : A[i - nIns];
+      return B;
+    }
+    var OFF = mv(nk.OFF, Int32Array);
+    for (var j = at; j < at + nIns; j++) OFF[j] = -1;
+    return { U0: mv(nk.U0, Float64Array), DU: mv(nk.DU, Float64Array), OFF: OFF, MP: mv(nk.MP, Float64Array),
+      VAL: nk.VAL, apos: nk.apos, slope: nk.slope, NX: mv(nk.NX, Float64Array), NY: mv(nk.NY, Float64Array),
+      CW: mv(nk.CW, Float64Array), aabs: nk.aabs };
   }
 
   // Legacy shape, kept for anything that inspected the capsule list:
@@ -1018,6 +1335,243 @@ select {
     return [minX, minY, maxX, maxY];
   }
 
+  // The warp's noise lattices over the traced area, hashed once: the warp
+  // is so low-frequency that a glyph spans only a few cells. LX / LY hold
+  // the two flow components in [-1, 1], LS the per-column sag in [0, 1].
+  function warpTables(wp, bounds, seed) {
+    var g = wp.g, gs = wp.gs, ws = (seed | 0) + 7919;
+    var lx0 = Math.floor(bounds[0] * g) - 1, ly0 = Math.floor(bounds[1] * g) - 1;
+    var lw = Math.floor(bounds[2] * g) + 3 - lx0, lh = Math.floor(bounds[3] * g) + 3 - ly0;
+    var LX = new Float64Array(lw * lh), LY = new Float64Array(lw * lh);
+    for (var y = 0; y < lh; y++) {
+      for (var x = 0; x < lw; x++) {
+        LX[y * lw + x] = hashU(x + lx0, y + ly0, ws) * 2 - 1;
+        LY[y * lw + x] = hashU(x + lx0, y + ly0, ws + 1) * 2 - 1;
+      }
+    }
+    var sx0 = Math.floor(bounds[0] * gs) - 1, sw = Math.floor(bounds[2] * gs) + 3 - sx0;
+    var LS = new Float64Array(sw);
+    for (var i = 0; i < sw; i++) LS[i] = hashU(i + sx0, 0, ws + 2);
+    wp.ws = ws; wp.lx0 = lx0; wp.ly0 = ly0; wp.lw = lw; wp.lh = lh; wp.LX = LX; wp.LY = LY;
+    wp.sx0 = sx0; wp.sw = sw; wp.LS = LS;
+  }
+
+  // ------------------------------------------------------------------ drips
+  // A few drips, seeded and curated, so a word reads as melting without
+  // turning into an icicle fringe. Only free stroke ends of the main group
+  // can drip (a dot, a mark or punctuation never does; GlyphCompose turns
+  // drips off there), in three kinds:
+  //   FOOT     an end pointing down at the floor (stems, diagonal legs)
+  //   LOWTIP   a level end in the bottom zone (L's bar, E's lower arm, 2)
+  //            -- both hang below the baseline, at most DRIP_DEPTH_MAX deep
+  //   HIGHTIP  a level end high in the glyph (T's bar, F's top arm, 7)
+  //            -- only where an axis ray falls freely to the floor (never
+  //            into a counter or a notch) with no ink above it (never from
+  //            a bowl's underside or a middle arm, so P can't read as R),
+  //            and the drop stops FLOOR_GAP above the floor.
+  // An end buried in other ink (a junction) never drips, and every drip
+  // keeps GAP_D of clear air to all other ink along its whole length.
+  // Each drip is a uniform neck (no taper, so the Lipschitz bound holds)
+  // plus a single-node drop, added as two ordinary chains right after the
+  // main group, so the melt flares the neck out of the stroke and rounds the
+  // drop into a teardrop; culling, bounds and padding include them as is.
+  // Everything is hashed from the seed (never from res): nothing pops when
+  // a slider is released.
+  var DRIP_DEPTH_MAX = 30;   // a low drip hangs at most this far below its end's ink
+  var DRIP_REACH = 100;      // neck length scale, glyph units
+  function planDrips(sk, bb, nk, o) {
+    var a = o.drip, f = o.dripForm, seed = o.seed | 0;
+    var info = sk.chains || [], ncap = sk.length / STRIDE, h = bb[3] - bb[1];
+    if (!(a > 0) || !info.length || h < 40) return null;
+    if (hashU(17, 3, seed) >= Math.min(0.92, 1.3 * a)) return null;
+    var k = o.melt > 0 ? o.melt : 0, ten = o.tension, wob = o.wobble, mass = o.mass > 0 ? o.mass : 1;
+    var jf = o.jf || 0;
+    var GAP_D = 0.5 * k + 3 + 0.75 * wob;
+    var NECK_MIN = (3 + 0.35 * wob) * (1 + 0.5 * jf);
+    var FLOOR_GAP = Math.max(10, 0.09 * h);
+    var VAL = nk && nk.VAL, OFF = nk && nk.OFF, MPa = nk && nk.MP;
+    // capsule boxes and radii at their fullest bead: clearance is in ink
+    var BX0 = new Float64Array(ncap), BX1 = new Float64Array(ncap), BY0 = new Float64Array(ncap), BY1 = new Float64Array(ncap);
+    var BR = new Float64Array(ncap), GRW = new Float64Array(ncap), m, p;
+    var rFoot = 1e9;
+    for (m = 0; m < ncap; m++) {
+      p = m * STRIDE;
+      GRW[m] = 1 + (MPa ? MPa[m] : 0);
+      BX0[m] = Math.min(sk[p], sk[p + 3]); BX1[m] = Math.max(sk[p], sk[p + 3]);
+      BY0[m] = Math.min(sk[p + 1], sk[p + 4]); BY1[m] = Math.max(sk[p + 1], sk[p + 4]);
+      BR[m] = Math.max(sk[p + 2], sk[p + 5]) * GRW[m];
+      if (sk[p + 1] + sk[p + 2] >= bb[3] - 3) rFoot = Math.min(rFoot, sk[p + 2]);
+      if (sk[p + 4] + sk[p + 5] >= bb[3] - 3) rFoot = Math.min(rFoot, sk[p + 5]);
+    }
+    // ink the axis may meet low down without it being a counter's floor
+    var floorHit = bb[3] - 1.1 * (rFoot < 1e9 ? rFoot : 10);
+    function own(q, c, a0, a1) {          // capsule q is chain c within arc [a0, a1]
+      var pq = q * STRIDE;
+      if (sk[pq + 10] !== c) return false;
+      var s0 = sk[pq + 8], s1 = sk[pq + 9];
+      if (s1 >= a0 && s0 <= a1) return true;
+      if (!info[c].closed) return false;
+      var L = info[c].len;
+      return (s1 + L >= a0 && s0 + L <= a1) || (s1 - L >= a0 && s0 - L <= a1);
+    }
+    // signed distance from (px, py) to the visible ink, leaving out chain c
+    // within arc [a0, a1] (the stroke a drip hangs from); c < 0: nothing
+    function inkDist(px, py, c, a0, a1) {
+      var best = 1e9;
+      for (var q = 0; q < ncap; q++) {
+        var ox = px < BX0[q] ? BX0[q] - px : px > BX1[q] ? px - BX1[q] : 0;
+        var oy = py < BY0[q] ? BY0[q] - py : py > BY1[q] ? py - BY1[q] : 0;
+        if ((ox > oy ? ox : oy) - BR[q] - ten >= best) continue;
+        if (c >= 0 && own(q, c, a0, a1)) continue;
+        var pq = q * STRIDE, ax = sk[pq], ay = sk[pq + 1], bx = sk[pq + 3] - ax, by = sk[pq + 4] - ay;
+        var l2 = bx * bx + by * by, t = l2 > 1e-9 ? ((px - ax) * bx + (py - ay) * by) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        var d = Math.hypot(px - ax - bx * t, py - ay - by * t) - (sk[pq + 2] + (sk[pq + 5] - sk[pq + 2]) * t) * GRW[q] - ten;
+        if (d < best) best = d;
+      }
+      return best;
+    }
+    // candidate ends
+    var cands = [];
+    for (var c = 0; c < info.length; c++) {
+      var C = info[c];
+      if (C.closed || C.drip || C.group !== 0 || C.c1 - C.c0 < 1 || !(C.len > 0)) continue;
+      for (var e = 0; e < 2; e++) {
+        var ci = e === 0 ? C.c0 : C.c1 - 1, step = e === 0 ? 1 : -1, cj = ci, dx = 0, dy = 0, dl = 0;
+        for (; cj >= C.c0 && cj < C.c1; cj += step) {
+          p = cj * STRIDE; dx = sk[p + 3] - sk[p]; dy = sk[p + 4] - sk[p + 1]; dl = Math.hypot(dx, dy);
+          if (dl > 1e-6) break;
+        }
+        if (!(dl > 1e-6)) continue;
+        if (e === 0) { dx = -dx; dy = -dy; }
+        dx /= dl; dy /= dl;
+        p = ci * STRIDE;
+        var x = e === 0 ? sk[p] : sk[p + 3], y = e === 0 ? sk[p + 1] : sk[p + 4], r = e === 0 ? sk[p + 2] : sk[p + 5];
+        var aE = e === 0 ? 0 : C.len;
+        var mE = nk && OFF[ci] >= 0 && C.n ? VAL[OFF[ci] + (e === 0 ? 0 : C.n)] : 0;
+        var inkR = r * (1 + mE) + ten;
+        if (inkR < 6) continue;
+        var lowZ = y + r >= bb[3] - 0.12 * h, cls, w0;
+        if (dy >= 0.6 && lowZ) { cls = 1; w0 = dy >= 0.9 ? 1 : 0.75; }
+        else if (Math.abs(dy) <= 0.45 && lowZ) { cls = 2; w0 = 0.6; }
+        else if (Math.abs(dy) <= 0.45 && y <= bb[1] + 0.6 * h) { cls = 3; w0 = 0.9; }
+        else continue;
+        var win = 2.5 * r;
+        if (inkDist(x, y, c, aE - win, aE + win) + ten < -0.5 * r) continue;   // buried: a junction
+        var id = c * 2 + e;
+        cands.push({ c: c, x: x, y: y, r: r, dx: dx, inkR: inkR, cls: cls, aE: aE, win: win, id: id,
+          w: w0 * (0.4 + 0.6 * hashU(id, 101, seed)) });
+      }
+    }
+    if (!cands.length) return null;
+    cands.sort(function (u, v) { return v.w - u.w || u.id - v.id; });
+
+    function shape(cd) {
+      var R1 = hashU(cd.id, 102, seed), R2 = hashU(cd.id, 103, seed), R3 = hashU(cd.id, 104, seed), R4 = hashU(cd.id, 105, seed);
+      var high = cd.cls === 3, tip = cd.cls !== 1, inkR = cd.inkR, yy, d0;
+      var rn = Math.max(NECK_MIN, inkR * (0.22 + 0.10 * (1 - f)));
+      var rd = Math.max(rn + 2, inkR * (0.32 + 0.24 * (1 - f)) * (0.85 + 0.3 * R2));
+      var Ln = DRIP_REACH * (0.03 + 0.11 * f + 0.05 * a) * (0.6 + 0.8 * R1) * (high ? 1.6 : 1);
+      var xr = cd.x + (R3 - 0.5) * 0.4 * inkR * (tip ? 0.5 : 1);
+      if (tip) xr += (cd.dx >= 0 ? 1 : -1) * 0.35 * inkR;
+      var lim = Math.max(0, inkR - rn - 1);           // the neck leaves through the end's own ink
+      xr = Math.max(cd.x - lim, Math.min(cd.x + lim, xr));
+      var ox = xr - cd.x, yEdge = cd.y + Math.sqrt(Math.max(0, inkR * inkR - ox * ox));
+      var inkBot = cd.y + inkR;
+      if (high) {
+        // the axis falls freely to the floor zone (never starts in a counter
+        // or a notch), and no ink sits above the tip (no bowl underside, no
+        // middle arm)
+        for (yy = yEdge + 2; yy < floorHit; yy += 2) if (inkDist(xr, yy, cd.c, cd.aE - cd.win, cd.aE + cd.win) < 0.5) return null;
+        for (yy = cd.y - inkR - 3; yy > cd.y - 0.5 * h; yy -= 3) if (inkDist(xr, yy, cd.c, cd.aE - cd.win, cd.aE + cd.win) < 0) return null;
+      }
+      var win2 = cd.win + rd;
+      for (var fit = 0; fit < 8; fit++) {
+        if (high) {
+          d0 = yEdge + Ln + 2 * rd - 1 - (bb[3] + ten - FLOOR_GAP);
+          if (d0 > 0) Ln -= d0;
+        } else {
+          d0 = yEdge + Ln + 2 * rd - 1 - inkBot - DRIP_DEPTH_MAX;
+          if (d0 > 0) Ln -= d0;
+        }
+        if (Ln < 2) { rd -= 2 - Ln; Ln = 2; }
+        if (rd < rn + 2) return null;
+        // the drop drifts a little, but stays within the end's own width
+        var jm = Math.max(0, inkR - rd - Math.abs(ox));
+        var xd = xr + Math.max(-jm, Math.min(jm, (R4 - 0.5) * 0.25 * Ln));
+        var yc = yEdge + Ln + rd - 1, yB = yc + rd, yN = yEdge + Ln, ok = true;
+        for (yy = yEdge - Math.min(4, 0.5 * inkR); yy <= yB + 0.01 && ok; yy += 2) {
+          var tt = (yy - cd.y) / Math.max(1e-6, yN - cd.y);
+          var axx = yy >= yN ? xd : xr + (xd - xr) * (tt < 0 ? 0 : tt);
+          var hw = rn, dyc = yy - yc;
+          if (dyc * dyc < rd * rd) hw = Math.max(hw, Math.sqrt(rd * rd - dyc * dyc));
+          if (inkDist(axx, yy, cd.c, cd.aE - win2, cd.aE + win2) < hw + GAP_D) ok = false;
+        }
+        if (ok) {
+          var rnS = Math.max(0.5, (rn - ten) / mass), rdS = Math.max(0.5, (rd - ten) / mass);
+          var neck = [[xr, cd.y, rnS], [xd, yN, rnS]], drop = [[xd, yc, rdS]];
+          neck.drip = 1; drop.drip = 1;
+          return { low: !high, kind: ['', 'foot', 'lowtip', 'hightip'][cd.cls], x: cd.x, y: cd.y, inkR: inkR,
+            xr: xr, xd: xd, rn: rn, rd: rd, len: Ln, depth: yB - inkBot, chains: [neck, drop] };
+        }
+        if (fit % 2 === 0) Ln *= 0.75; else rd = Math.max(rn + 2, rd * 0.85);
+      }
+      return null;
+    }
+    var list = [];
+    var want = hashU(29, 5, seed) < Math.max(0, Math.min(0.7, 2 * (a - 0.45))) ? 2 : 1;
+    for (var i = 0; i < cands.length && list.length < want; i++) {
+      var D = shape(cands[i]);
+      if (!D) continue;
+      if (list.length && Math.abs(list[0].xd - D.xd) < list[0].rd + D.rd + 2 * GAP_D + 6) continue;
+      list.push(D);
+    }
+    return list.length ? list : null;
+  }
+
+  // The ink bottom of a glyph leaving its low drips out, measured exactly:
+  // the lowest ring point outside every drip's band, and under each drip a
+  // few columns probed down the drip-free field (field.noDrip). This is what
+  // the tools set the baseline from, so drips never move a word's baseline.
+  function computeFoot(rings, low, field, res, k) {
+    var foot = -1e9, i, j, m, p, D;
+    for (i = 0; i < rings.length; i++) {
+      for (j = 0; j < rings[i].length; j++) {
+        p = rings[i][j];
+        if (p[1] <= foot) continue;
+        var band = false;
+        for (m = 0; m < low.length && !band; m++) {
+          D = low[m];
+          var hw = D.rd + 0.5 * k + 2;
+          if (p[1] > D.y && p[0] > Math.min(D.xr, D.xd) - hw && p[0] < Math.max(D.xr, D.xd) + hw) band = true;
+        }
+        if (!band) foot = p[1];
+      }
+    }
+    var nd = field.noDrip || field;
+    for (m = 0; m < low.length; m++) {
+      D = low[m];
+      for (var s = -2; s <= 2; s++) {
+        var x = D.x + s * 0.3 * D.inkR, y0 = D.y, y1 = y0;
+        if (!(nd(x, y0) < 0)) continue;
+        var out = false;
+        for (var st = 0; st < 80; st++) {
+          y1 = y0 + res;
+          if (nd(x, y1) >= 0) { out = true; break; }
+          y0 = y1;
+        }
+        if (!out) continue;
+        for (var bi = 0; bi < 10; bi++) {
+          var ym = (y0 + y1) * 0.5;
+          if (nd(x, ym) < 0) y0 = ym; else y1 = ym;
+        }
+        var yb = (y0 + y1) * 0.5;
+        if (yb > foot) foot = yb;
+      }
+    }
+    return foot > -1e9 ? foot : null;
+  }
+
   // The field: per point, each piece is the hard minimum of its capsules;
   // pieces are folded in with the sequential smooth-min (k = melt), and the
   // result is capped at one pairwise blend below the hard minimum, so a
@@ -1028,13 +1582,48 @@ select {
   // contour there (bbox grown by `reach`). Anything farther is provably
   // irrelevant: its distance exceeds every in-bucket hard minimum that can
   // reach the zero level by more than the melt width.
+  //
+  // Liquid terms (all optional, all off by default):
+  //  - nk (neckLattice): the radius of a capsule is scaled by 1 + m(s) along
+  //    its chain. Evaluated lazily: a capsule whose distance minus its
+  //    fullest possible bead can't beat its piece's minimum is skipped. A
+  //    neck never thins the visible stroke below about NECK_FLOOR units (a
+  //    stroke already that thin just doesn't neck), so thin settings can't
+  //    snap a stroke in two.
+  //  - opts.sagX: gravity on the cross-section. Below its axis a stroke is
+  //    measured with dy shrunk by 1 / (1 + sagX * w), so it hangs fuller
+  //    underneath: feet round into drops, bottom bars and bowls pool
+  //    downward. w ramps from 0 at mid-height to 1 at the foot (by the
+  //    capsule's centre), so a top bar or a bowl's upper arc never sags into
+  //    the counter below it. Shrinking a coordinate can't raise the slope.
+  //  - opts.warp: domain warp, applied around the whole field (see below).
+  //  - opts.dLo / dHi: the drip capsules. The field then also keeps bucket
+  //    lists without them, read by field.noDrip(x, y) (see computeFoot).
   var BUCKET = 8;
-  function makeField(sk, opts, bounds) {
+  var W_FACE = 0.45;    // strokes overlapping face to face still pool this much
+  var GAP_W0 = 0.30;    // melt kept across a gap at its narrowest (crease roots round)
+  var GAP_KEEP = 0.5;   // facing strokes melt across at most 1 - this of their gap
+  var GAP_C0 = -0.5, GAP_C1 = -0.85;   // gradient cosines where the gap rule fades in
+  var GAP_LIP = 0.2;    // the most the gap rule can steepen the field
+  var NECK_FLOOR = 2.5, NECK_FLOOR_WOB = 0.6;   // thinnest necked stroke (ink radius)
+  var PIN_LO = 0.4, PIN_H = 0.35;   // the warp's vertical slide near the baseline, and its fade height
+  function makeField(sk, opts, bounds, nk) {
     var melt = opts.melt, tension = opts.tension;
     var wob = opts.wobble, grain = opts.grain, seed = opts.seed;
+    // a stretched surface: lower noise frequency in y runs the wobble
+    // downward (only lowers its slope, so lip still holds)
+    var grainY = grain / (opts.stretch > 1 ? opts.stretch : 1);
     var res = opts.res || 1.7;
     var k = melt > 1e-6 ? melt : 0, kq = k * 0.25;
+    var gapK = k > 0 ? 2 * (1 - GAP_KEEP) / k : 0, gapCS = 1 / (GAP_C0 - GAP_C1);
     var ncap = sk.length / STRIDE;
+    var sagX = opts.sagX > 0 ? opts.sagX : 0;
+    var nOn = !!nk;
+    var U0 = nk && nk.U0, DU = nk && nk.DU, OFF = nk && nk.OFF, VAL = nk && nk.VAL, MP = nk && nk.MP;
+    var NX = nk && nk.NX, NY = nk && nk.NY, CW = nk && nk.CW;
+    // the neck floor, in capsule units (the noise and the warp can thin a
+    // stroke further, hence their margins)
+    var nfloor = (NECK_FLOOR + NECK_FLOOR_WOB * wob) * (1 + 0.5 * (opts.jf || 0)) - tension;
     // Exactness is needed wherever the hard minimum dh can still reach the
     // contour (dh <= T): within interpolation range of zero, or within the
     // coarse sampler's skip radius (see sampleGrid). Capsules farther than
@@ -1047,8 +1636,11 @@ select {
     var AX = new Float64Array(ncap), AY = new Float64Array(ncap), RA = new Float64Array(ncap);
     var BX = new Float64Array(ncap), BY = new Float64Array(ncap), IL = new Float64Array(ncap);
     var DR = new Float64Array(ncap), PC = new Int32Array(ncap), GR = new Int32Array(ncap);
+    var ISG = new Float64Array(ncap).fill(1);
+    var stop = opts.bb ? opts.bb[1] : 0, sih = opts.bb ? 1 / Math.max(1e-6, opts.bb[3] - opts.bb[1]) : 0;
     for (var i = 0; i < ncap; i++) {
       var o = i * STRIDE;
+      if (sagX > 0) ISG[i] = 1 / (1 + sagX * smoothstep(0.5, 0.95, ((sk[o + 1] + sk[o + 4]) * 0.5 - stop) * sih));
       AX[i] = sk[o]; AY[i] = sk[o + 1]; RA[i] = sk[o + 2];
       BX[i] = sk[o + 3] - sk[o]; BY[i] = sk[o + 4] - sk[o + 1];
       var l2 = BX[i] * BX[i] + BY[i] * BY[i];
@@ -1060,35 +1652,111 @@ select {
     var gx0 = bounds[0], gy0 = bounds[1];
     var gw = Math.max(1, Math.ceil((bounds[2] - gx0) / BUCKET) + 1);
     var gh = Math.max(1, Math.ceil((bounds[3] - gy0) / BUCKET) + 1);
-    var counts = new Int32Array(gw * gh + 1);
     var spans = new Int32Array(ncap * 4);
     for (var c = 0; c < ncap; c++) {
-      var o2 = c * STRIDE, ra = sk[o2 + 2], rb = sk[o2 + 5];
-      var bx0 = Math.min(sk[o2] - ra, sk[o2 + 3] - rb) - reach, bx1 = Math.max(sk[o2] + ra, sk[o2 + 3] + rb) + reach;
-      var by0 = Math.min(sk[o2 + 1] - ra, sk[o2 + 4] - rb) - reach, by1 = Math.max(sk[o2 + 1] + ra, sk[o2 + 4] + rb) + reach;
-      var cx0 = Math.max(0, Math.floor((bx0 - gx0) / BUCKET)), cx1 = Math.min(gw - 1, Math.floor((bx1 - gx0) / BUCKET));
-      var cy0 = Math.max(0, Math.floor((by0 - gy0) / BUCKET)), cy1 = Math.min(gh - 1, Math.floor((by1 - gy0) / BUCKET));
-      spans[c * 4] = cx0; spans[c * 4 + 1] = cx1; spans[c * 4 + 2] = cy0; spans[c * 4 + 3] = cy1;
-      for (var yy = cy0; yy <= cy1; yy++) for (var xx = cx0; xx <= cx1; xx++) counts[yy * gw + xx + 1]++;
+      // a bead can push this capsule's surface out by 1 + MP, and the sag
+      // measures distance below its axis up to 1 / ISG times shorter
+      var grow = (nOn ? 1 + MP[c] : 1) / ISG[c], reachG = reach / ISG[c];
+      var o2 = c * STRIDE, ra = sk[o2 + 2] * grow, rb = sk[o2 + 5] * grow;
+      var bx0 = Math.min(sk[o2] - ra, sk[o2 + 3] - rb) - reachG, bx1 = Math.max(sk[o2] + ra, sk[o2 + 3] + rb) + reachG;
+      var by0 = Math.min(sk[o2 + 1] - ra, sk[o2 + 4] - rb) - reachG, by1 = Math.max(sk[o2 + 1] + ra, sk[o2 + 4] + rb) + reachG;
+      spans[c * 4] = Math.max(0, Math.floor((bx0 - gx0) / BUCKET)); spans[c * 4 + 1] = Math.min(gw - 1, Math.floor((bx1 - gx0) / BUCKET));
+      spans[c * 4 + 2] = Math.max(0, Math.floor((by0 - gy0) / BUCKET)); spans[c * 4 + 3] = Math.min(gh - 1, Math.floor((by1 - gy0) / BUCKET));
     }
-    for (var b = 1; b <= gw * gh; b++) counts[b] += counts[b - 1];
-    var fill = counts.slice(0, gw * gh);
-    var idx = new Int32Array(counts[gw * gh]);
-    for (var c2 = 0; c2 < ncap; c2++) {   // ascending, so pieces stay contiguous
-      for (var y2 = spans[c2 * 4 + 2]; y2 <= spans[c2 * 4 + 3]; y2++) {
-        for (var x2 = spans[c2 * 4]; x2 <= spans[c2 * 4 + 1]; x2++) idx[fill[y2 * gw + x2]++] = c2;
+    // bucket lists, ascending (so pieces stay contiguous), leaving out
+    // capsules [xLo, xHi)
+    function lists(xLo, xHi) {
+      var cnt = new Int32Array(gw * gh + 1), cc, yy, xx;
+      for (cc = 0; cc < ncap; cc++) {
+        if (cc >= xLo && cc < xHi) continue;
+        for (yy = spans[cc * 4 + 2]; yy <= spans[cc * 4 + 3]; yy++) for (xx = spans[cc * 4]; xx <= spans[cc * 4 + 1]; xx++) cnt[yy * gw + xx + 1]++;
       }
+      for (var b = 1; b <= gw * gh; b++) cnt[b] += cnt[b - 1];
+      var fill = cnt.slice(0, gw * gh), ix = new Int32Array(cnt[gw * gh]);
+      for (cc = 0; cc < ncap; cc++) {
+        if (cc >= xLo && cc < xHi) continue;
+        for (yy = spans[cc * 4 + 2]; yy <= spans[cc * 4 + 3]; yy++) for (xx = spans[cc * 4]; xx <= spans[cc * 4 + 1]; xx++) ix[fill[yy * gw + xx]++] = cc;
+      }
+      return [cnt, ix];
     }
+    var L0 = lists(0, 0), counts = L0[0], idx = L0[1];
     var far = reach - tension;   // a point with no capsule in reach is outside
 
-    // The pieces are folded in with a smooth-min that only fills where two
-    // surfaces meet at an angle: its fillet is weighted by 1 - cos of the
-    // angle between their gradients (capped at 1). A crease or a gap between
-    // strokes gets the full melt, but where two strokes overlap face to face
-    // (the shared node of a corner, a bar end inside a stem) nothing
-    // inflates, so corners and junctions hold the flat cap and base lines.
+    // Domain warp: the field is read at q = p - D(p), so the ink drawn at p
+    // is the ink of q -- the whole letter slides along D. D is a smooth,
+    // low-frequency vector noise (the surface flows instead of fizzing)
+    // plus gravity: below the top SAG_TOP of the glyph the ink slides down
+    // (more in some columns than others) and the foot spreads sideways,
+    // like a candle melting onto the table. The flow's vertical part is
+    // pinned to PIN_LO of itself near the baseline, so feet don't bounce
+    // from letter to letter. glyphTrace keeps the map one-to-one (strokes
+    // can't tear, counters can't close) and folds the most it can steepen
+    // the field into o.lip.
+    var wp = opts.warp, wOn = !!wp;
+    var wax = 0, way = 0, wg = 0, wsa = 0, wgs = 0, wtop = 0, wih = 0, wsp = 0, wcx = 0, wihw = 0, ws = 0;
+    var wpy = 0, wpi = 0;
+    var lx0 = 0, ly0 = 0, lw = 0, lh = 0, LX = null, LY = null, sx0 = 0, sw = 0, LS = null;
+    if (wOn) {
+      if (!wp.LX) warpTables(wp, bounds, seed);
+      wax = wp.ax; way = wp.ay; wg = wp.g; wsa = wp.sa; wgs = wp.gs; wtop = wp.top; wih = 1 / wp.h;
+      wsp = wp.sp; wcx = wp.cx; wihw = 1 / wp.hw; ws = wp.ws;
+      wpy = wp.pinY || 0; wpi = wp.pinInv || 0;
+      lx0 = wp.lx0; ly0 = wp.ly0; lw = wp.lw; lh = wp.lh; LX = wp.LX; LY = wp.LY;
+      sx0 = wp.sx0; sw = wp.sw; LS = wp.LS;
+    }
+    var vScale = 1 / (1 - SAG_TOP);
+
+    // The pieces are folded in with a smooth-min whose fillet is weighted by
+    // how the two surfaces meet (c = cos of the angle between gradients):
+    //   crease (c ~ 0: an L corner, a bar leaving a stem): the full fillet;
+    //   face to face (c -> 1: a shared corner node, a bar end inside a
+    //     stem): still W_FACE of it, so joints swell into pools;
+    //   across a gap (c < GAP_C0: a counter, the gap between H's legs, an
+    //     acute crease): the melt bridges at most 1 - GAP_KEEP of the gap
+    //     (GAP_W0 at its root, so a crease rounds instead of slivering).
+    // The folded gradient is a blend of unit vectors, never renormalised:
+    // midway between two facing strokes it shrinks toward zero, so c -> 0
+    // and the next piece gets a clean weight instead of one that flips sign.
+    //
+    // Beads are evaluated lazily: a capsule's distance minus its fullest
+    // bead (MP) is a lower bound, and the exact value is only needed if that
+    // bound could still lower its piece's minimum below hard-min + melt. A
+    // piece that stays above dh + k can't reach the fold (the running fold is
+    // never above dh when a piece is folded) nor the hard minimum.
     // (Written out twice, inline, because this is the hot loop.)
-    return function (px, py) {
+    var field = function (px, py) {
+      if (wOn) {
+        var ux = px * wg, uy = py * wg, ix = Math.floor(ux), iy = Math.floor(uy);
+        var fx = ux - ix, fy = uy - iy, qx = px, qy = py;
+        var pin = (wpy - py) * wpi;
+        pin = pin <= 0 ? PIN_LO : pin >= 1 ? 1 : PIN_LO + (1 - PIN_LO) * pin * pin * (3 - 2 * pin);
+        ix -= lx0; iy -= ly0;
+        if (ix >= 0 && iy >= 0 && ix < lw - 1 && iy < lh - 1) {
+          var sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy), lo = iy * lw + ix;
+          var na = LX[lo], nb = LX[lo + 1], nc = LX[lo + lw], nd = LX[lo + lw + 1];
+          qx -= wax * ((na + (nb - na) * sx) * (1 - sy) + (nc + (nd - nc) * sx) * sy);
+          na = LY[lo]; nb = LY[lo + 1]; nc = LY[lo + lw]; nd = LY[lo + lw + 1];
+          qy -= way * pin * ((na + (nb - na) * sx) * (1 - sy) + (nc + (nd - nc) * sx) * sy);
+        } else {
+          qx -= wax * (2 * flowNoise(ux, uy, ws) - 1);
+          qy -= way * pin * (2 * flowNoise(ux, uy, ws + 1) - 1);
+        }
+        var v = ((py - wtop) * wih - SAG_TOP) * vScale;
+        if (v > 0 && (wsa > 0 || wsp > 0)) {
+          // v^2, eased into a flat cap just below the lowest ink (C1)
+          var vv = v <= 1 ? v * v : v < 1 + RAMP_C ? 1 + 2 * (v - 1) - (v - 1) * (v - 1) / RAMP_C : 1 + RAMP_C;
+          var us = px * wgs, is = Math.floor(us), fs = us - is, n1;
+          is -= sx0;
+          if (is >= 0 && is < sw - 1) { fs = fs * fs * (3 - 2 * fs); n1 = LS[is] + (LS[is + 1] - LS[is]) * fs; }
+          else n1 = flowNoise(us, 0, ws + 2);
+          qy -= wsa * vv * (SAG_N0 + SAG_N1 * n1);
+          // the spread's lever: x, eased into +-2/3 LEVER_C at the sides (C1)
+          var X = (px - wcx) * wihw;
+          X = X <= -LEVER_C ? -LEVER_C * 2 / 3 : X >= LEVER_C ? LEVER_C * 2 / 3 : X - X * X * X / (3 * LEVER_C * LEVER_C);
+          qx -= wsp * vv * X;
+        }
+        px = qx; py = qy;
+      }
       var gxi = Math.floor((px - gx0) / BUCKET), gyi = Math.floor((py - gy0) / BUCKET);
       if (gxi < 0 || gyi < 0 || gxi >= gw || gyi >= gh) return far;
       var cell = gyi * gw + gxi, s = counts[cell], e = counts[cell + 1];
@@ -1097,26 +1765,57 @@ select {
       var d = 1e9, gx = 0, gy = 0;               // folded value + its gradient
       var pm = 1e9, pdx = 0, pdy = 0, pl = 0;     // current piece: min + offset
       var curP = -1, curG = GR[idx[s]];
-      var ad, h, bx, by, gl, w;
+      var ad, h, bx, by, w, cw, sg;
       for (var q = s; q < e; q++) {
         var i = idx[q];
         var ax = AX[i], ay = AY[i];
         var t = ((px - ax) * BX[i] + (py - ay) * BY[i]) * IL[i];
         if (t < 0) t = 0; else if (t > 1) t = 1;
         var dx = px - ax - BX[i] * t, dy = py - ay - BY[i] * t;
+        if (dy > 0) dy *= ISG[i];                // gravity: fuller underneath
         var len = Math.sqrt(dx * dx + dy * dy);
-        var di = len - (RA[i] + DR[i] * t);    // tapered-capsule distance
-        if (PC[i] !== curP) {
+        var rr = RA[i] + DR[i] * t;
+        var di = len - rr;                       // tapered-capsule distance
+        var np = PC[i] !== curP;
+        if (nOn) {
+          var ob = OFF[i];
+          if (ob >= 0) {
+            var lb = di - rr * MP[i], lim = dh + k;
+            if (!np && pm < lim) lim = pm;
+            if (lb < lim) {
+              var u = U0[i] + DU[i] * t, uc = u | 0, uf = u - uc, v0 = VAL[ob + uc];
+              var mm = v0 + (VAL[ob + uc + 1] - v0) * uf * uf * (3 - 2 * uf), cwi = CW[i];
+              if (rr > 1e-6) {
+                if (cwi > 0) {
+                  // on a curve, beads and necks fade: CURVE_DAMP on the outer
+                  // surface up to INNER_CUT on the inner one (the counter)
+                  var sn = (dx * NX[i] + dy * NY[i]) / (2 * rr) + 0.5;
+                  sn = sn < 0 ? 0 : sn > 1 ? 1 : sn;
+                  mm *= 1 - cwi * (CURVE_DAMP + (INNER_CUT - CURVE_DAMP) * sn);
+                }
+                var mf = nfloor / rr - 1;        // the neck floor (only ever raises m)
+                if (mf > 0) mf = 0;
+                if (mm < mf) mm = mf;
+              }
+              di = len - rr * (1 + mm);
+            } else di = lb;
+          }
+        }
+        if (np) {
           if (curP >= 0) {                       // fold the finished piece in
             ad = d > pm ? d - pm : pm - d;
-            if (ad >= k) { if (pm < d) { d = pm; gx = pdx; gy = pdy; gl = pl; } }
+            bx = pl > 1e-9 ? pdx / pl : 0; by = pl > 1e-9 ? pdy / pl : 0;
+            if (ad >= k) { if (pm < d) { d = pm; gx = bx; gy = by; } }
             else {
               h = (k - ad) / k;
-              gl = Math.sqrt(gx * gx + gy * gy);
-              w = gl > 1e-9 && pl > 1e-9 ? 1 - (gx * pdx + gy * pdy) / (gl * pl) : 1;
-              if (w > 1) w = 1;
-              bx = pl > 1e-9 ? pdx / pl : 0; by = pl > 1e-9 ? pdy / pl : 0;
-              gx = gl > 1e-9 ? gx / gl : 0; gy = gl > 1e-9 ? gy / gl : 0;
+              cw = gx * bx + gy * by;
+              if (cw >= 0) w = W_FACE + (1 - W_FACE) * (1 - cw);
+              else if (cw >= GAP_C0) w = 1;
+              else {
+                sg = (GAP_C0 - cw) * gapCS; if (sg > 1) sg = 1; sg = sg * sg * (3 - 2 * sg);
+                w = GAP_W0 + gapK * ((d > 0 ? d : 0) + (pm > 0 ? pm : 0));
+                w = 1 + ((w > 1 ? 1 : w) - 1) * sg;
+              }
               if (pm < d) { gx = gx * h * 0.5 + bx * (1 - h * 0.5); gy = gy * h * 0.5 + by * (1 - h * 0.5); d = pm; }
               else { gx = gx * (1 - h * 0.5) + bx * h * 0.5; gy = gy * (1 - h * 0.5) + by * h * 0.5; }
               d -= h * h * k * 0.25 * w;
@@ -1125,7 +1824,7 @@ select {
           if (GR[i] !== curG) {                  // finished group: cap + hard union
             if (d < dh - kq) d = dh - kq;
             if (d < best) best = d;
-            d = 1e9; dh = 1e9; curG = GR[i];
+            d = 1e9; dh = 1e9; gx = 0; gy = 0; curG = GR[i];
           }
           curP = PC[i]; pm = di; pdx = dx; pdy = dy; pl = len;
         } else if (di < pm) { pm = di; pdx = dx; pdy = dy; pl = len; }
@@ -1135,21 +1834,35 @@ select {
       if (ad >= k) { if (pm < d) d = pm; }
       else {
         h = (k - ad) / k;
-        gl = Math.sqrt(gx * gx + gy * gy);
-        w = gl > 1e-9 && pl > 1e-9 ? 1 - (gx * pdx + gy * pdy) / (gl * pl) : 1;
-        if (w > 1) w = 1;
+        cw = pl > 1e-9 ? (gx * pdx + gy * pdy) / pl : 0;
+        if (cw >= 0) w = W_FACE + (1 - W_FACE) * (1 - cw);
+        else if (cw >= GAP_C0) w = 1;
+        else {
+          sg = (GAP_C0 - cw) * gapCS; if (sg > 1) sg = 1; sg = sg * sg * (3 - 2 * sg);
+          w = GAP_W0 + gapK * ((d > 0 ? d : 0) + (pm > 0 ? pm : 0));
+          w = 1 + ((w > 1 ? 1 : w) - 1) * sg;
+        }
         d = (pm < d ? pm : d) - h * h * k * 0.25 * w;
       }
       if (d < dh - kq) d = dh - kq;
       if (d < best) best = d;
       if (wob > 0) {
         // two octaves of drifting noise = molten, uneven surface
-        var nz = valueNoise(px * grain, py * grain, seed) - 0.5;
-        nz += (valueNoise(px * grain * 2.3, py * grain * 2.3, seed + 91) - 0.5) * 0.5;
+        var nz = valueNoise(px * grain, py * grainY, seed) - 0.5;
+        nz += (valueNoise(px * grain * 2.3, py * grainY * 2.3, seed + 91) - 0.5) * 0.5;
         best += nz * wob;
       }
       return best - tension;
     };
+    if (opts.dHi > opts.dLo) {
+      var LN = lists(opts.dLo, opts.dHi);
+      field.noDrip = function (x, y) {
+        var c0 = counts, i0 = idx;
+        counts = LN[0]; idx = LN[1];
+        try { return field(x, y); } finally { counts = c0; idx = i0; }
+      };
+    }
+    return field;
   }
 
   // -------------------------------------------------------- marching squares
@@ -1163,6 +1876,12 @@ select {
   // is first sampled every COARSE cells, and a coarse cell whose corners all
   // sit farther from zero than lip * half its diagonal provably has no
   // contour inside, so its interior samples just take the corners' sign.
+  //
+  // The test recurses (a quadtree): a coarse cell that can't be skipped is
+  // split in four at its midpoints, and each quarter is tested again with
+  // its own, smaller radius, down to single cells. Near the contour that
+  // evaluates the same samples as before; in the margin around it (where
+  // a steeper field used to force whole coarse cells) most quarters skip.
   var COARSE = 4;
   function sampleGrid(field, x0, y0, hx, hy, nx, ny, lip) {
     var W = nx + 1, V = new Float64Array(W * (ny + 1));
@@ -1180,34 +1899,42 @@ select {
     for (var b = 0; b < ys.length; b++) {
       for (var a = 0; a < xs.length; a++) V[ys[b] * W + xs[a]] = field(x0 + xs[a] * hx, y0 + ys[b] * hy);
     }
-    var nca = xs.length - 1, ncb = ys.length - 1;
-    var flat = new Int8Array(nca * ncb);   // 1 / -1: no contour inside
-    for (b = 0; b < ncb; b++) {
-      var j0 = ys[b], j1 = ys[b + 1];
-      for (a = 0; a < nca; a++) {
-        var i0 = xs[a], i1 = xs[a + 1];
-        var c0 = V[j0 * W + i0], c1 = V[j0 * W + i1], c2 = V[j1 * W + i0], c3 = V[j1 * W + i1];
-        var thr = lip * 0.5 * Math.sqrt((i1 - i0) * hx * (i1 - i0) * hx + (j1 - j0) * hy * (j1 - j0) * hy);
-        if (c0 > thr && c1 > thr && c2 > thr && c3 > thr) { flat[b * nca + a] = 1; continue; }
-        if (c0 < -thr && c1 < -thr && c2 < -thr && c3 < -thr) { flat[b * nca + a] = -1; continue; }
-        for (j = j0; j <= j1; j++) {
-          for (i = i0; i <= i1; i++) {
-            var q = j * W + i;
-            if (V[q] !== V[q]) V[q] = field(x0 + i * hx, y0 + j * hy);
-          }
-        }
+    var flats = [];                        // [i0, j0, i1, j1] proven contour-free
+    function at(ii, jj) {
+      var q = jj * W + ii;
+      if (V[q] !== V[q]) V[q] = field(x0 + ii * hx, y0 + jj * hy);
+      return V[q];
+    }
+    function refine(i0, j0, i1, j1) {
+      if (i1 - i0 <= 1 && j1 - j0 <= 1) return;
+      var c0 = V[j0 * W + i0], c1 = V[j0 * W + i1], c2 = V[j1 * W + i0], c3 = V[j1 * W + i1];
+      var thr = lip * 0.5 * Math.sqrt((i1 - i0) * hx * (i1 - i0) * hx + (j1 - j0) * hy * (j1 - j0) * hy);
+      if ((c0 > thr && c1 > thr && c2 > thr && c3 > thr) || (c0 < -thr && c1 < -thr && c2 < -thr && c3 < -thr)) {
+        flats.push(i0, j0, i1, j1);
+        return;
+      }
+      var im = (i0 + i1) >> 1, jm = (j0 + j1) >> 1;
+      if (im > i0) { at(im, j0); at(im, j1); }
+      if (jm > j0) { at(i0, jm); at(i1, jm); }
+      if (im > i0 && jm > j0) at(im, jm);
+      if (im > i0 && jm > j0) {
+        refine(i0, j0, im, jm); refine(im, j0, i1, jm); refine(i0, jm, im, j1); refine(im, jm, i1, j1);
+      } else if (im > i0) {
+        refine(i0, j0, im, j1); refine(im, j0, i1, j1);
+      } else {
+        refine(i0, j0, i1, jm); refine(i0, jm, i1, j1);
       }
     }
-    for (b = 0; b < ncb; b++) {
-      for (a = 0; a < nca; a++) {
-        var f = flat[b * nca + a];
-        if (!f) continue;
-        var fill = V[ys[b] * W + xs[a]];
-        for (j = ys[b]; j <= ys[b + 1]; j++) {
-          for (i = xs[a]; i <= xs[a + 1]; i++) {
-            var q2 = j * W + i;
-            if (V[q2] !== V[q2]) V[q2] = fill;
-          }
+    for (b = 0; b + 1 < ys.length; b++) {
+      for (a = 0; a + 1 < xs.length; a++) refine(xs[a], ys[b], xs[a + 1], ys[b + 1]);
+    }
+    for (var f = 0; f < flats.length; f += 4) {
+      var fi0 = flats[f], fj0 = flats[f + 1], fi1 = flats[f + 2], fj1 = flats[f + 3];
+      var fill = V[fj0 * W + fi0];
+      for (j = fj0; j <= fj1; j++) {
+        for (i = fi0; i <= fi1; i++) {
+          var q2 = j * W + i;
+          if (V[q2] !== V[q2]) V[q2] = fill;
         }
       }
     }
@@ -1216,8 +1943,10 @@ select {
 
   function contour(field, bounds, res, lip) {
     var x0 = bounds[0], y0 = bounds[1], x1 = bounds[2], y1 = bounds[3];
-    var nx = Math.max(2, Math.ceil((x1 - x0) / res));
-    var ny = Math.max(2, Math.ceil((y1 - y0) / res));
+    // (a span that is a whole number of cells, as glyphTrace makes it, keeps
+    // exactly that many despite rounding)
+    var nx = Math.max(2, Math.ceil((x1 - x0) / res - 1e-6));
+    var ny = Math.max(2, Math.ceil((y1 - y0) / res - 1e-6));
     var hx = (x1 - x0) / nx, hy = (y1 - y0) / ny;
 
     // sample grid once
@@ -1517,7 +2246,13 @@ select {
   // chains: [[ [x, y, r(, flag)], ... ], ...]. A node's optional 4th element
   // 1 on a chain's FIRST node starts a detached group (see buildSkeleton);
   // plain [x, y, r] nodes behave exactly as before.
-  function glyphRings(chains, opts) {
+  //
+  // glyphTrace returns { rings, foot, drips }: foot is the glyph's ink
+  // bottom without its low drips (null when none hang below), which is what
+  // a baseline should be measured from; drips counts them ({ low, high }).
+  // glyphRings is the rings alone.
+  function clamp01(v) { return v > 0 ? (v < 1 ? v : 1) : 0; }
+  function glyphTrace(chains, opts) {
     opts = opts || {};
     var o = {
       mass: opts.mass == null ? 1 : opts.mass,
@@ -1530,26 +2265,145 @@ select {
       res: opts.res == null ? 1.7 : opts.res,
       simplify: opts.simplify == null ? 0.3 : opts.simplify,
       minArea: opts.minArea == null ? 30 : opts.minArea,
+      // liquid terms; a missing key is off
+      flow: clamp01(opts.flow), warp: clamp01(opts.warp), neck: clamp01(opts.neck), sag: clamp01(opts.sag),
+      drip: clamp01(opts.drip), dripForm: opts.dripForm == null ? 0.5 : clamp01(opts.dripForm),
+      stretch: opts.stretch > 1 ? Math.min(3, opts.stretch) : 1,
     };
-    var sk = buildSkeleton(chains || [], o.mass);
-    if (!sk.length) return [];
+    chains = chains || [];
+    var skB = buildSkeleton(chains, o.mass);
+    if (!skB.length) return { rings: [], foot: null, drips: { low: 0, high: 0, list: [] } };
+    // the glyph's frame, without drips: the warp, the gravity and the drip
+    // rules all measure from it
+    var bbB = skeletonBounds(skB);
+    var bw = bbB[2] - bbB[0], bh = bbB[3] - bbB[1];
+
+    // Domain warp (see makeField), scaled with the glyph so a small accent
+    // isn't thrown about as far as a capital. Flow sets how far the surface
+    // moves, the preset's warp and neck how that motion is shared.
+    var sz = Math.max(0.25, Math.min(1, Math.max(bw, bh) / 130));
+    var warpAmp = o.flow * WARP_MAX * o.warp;
+    var neckAmp = Math.min(0.5, o.flow * NECK_MAX * o.neck);
+    var wp = null, jf = 0, J = 1;
+    if (warpAmp > 0 || o.sag > 0) {
+      var wh = Math.max(20, bh);
+      wp = {
+        ax: 0.7 * warpAmp * sz, ay: warpAmp * sz, g: Math.max(0.012, Math.min(0.035, 0.012 + 0.12 * o.grain)),
+        sa: SAG_W * o.sag * sz, sp: SAG_SPREAD * o.sag * sz, gs: SAG_GS,
+        top: bbB[1], h: wh, cx: (bbB[0] + bbB[2]) / 2, hw: Math.max(15, bw / 2),
+        pinY: bbB[3] - 0.05 * wh, pinInv: 1 / (PIN_H * wh),
+      };
+      // The warp's Jacobian J_D = J_flow + J_grav, bounded from the slopes of
+      // its parts: |grad flowNoise| <= 1.5 per cell on a [-1, 1] lattice;
+      // the baseline pin's slope <= (1 - PIN_LO) * 1.5 / (PIN_H * h) on the
+      // vertical flow; the ramp w <= 1 + RAMP_C with 0 <= dw/dv <= 2; the
+      // column factor in (0, N0 + N1], its slope <= N1 * 1.5 * gs; the lever
+      // |X| <= 2/3 LEVER_C with 0 <= dX/dx <= 1 / hw.
+      // Gravity only ever stretches: its diagonal entries (the slide's
+      // d/dy, the spread's d/dx) are >= 0, so they can't steepen the field;
+      // only its off-diagonal entries can. Hence
+      //   |I - J_D| <= sigma_max([[1, Gxy], [Gyx, 1]]) + |J_flow|,
+      // and the map is one-to-one because the symmetric part of I - J_D
+      // stays positive definite (a strictly monotone map can't fold):
+      //   1 - max(Gxx, Gyy) - (Gxy + Gyx) / 2 - |J_flow| > 0,
+      // which FLOW_J + GRAV_J < 1 guarantees: amplitudes past either cap
+      // are scaled back (the flow's two parts both scale with amplitude).
+      var vy = 1 / ((1 - SAG_TOP) * wp.h), wmax = 1 + RAMP_C, lv = LEVER_C * 2 / 3;
+      jf = 3 * wp.g * Math.hypot(wp.ax, wp.ay) + wp.ay * (1 - PIN_LO) * 1.5 * wp.pinInv;
+      if (jf > FLOW_J) { wp.ax *= FLOW_J / jf; wp.ay *= FLOW_J / jf; jf = FLOW_J; }
+      var gxx = wp.sp * wmax / wp.hw, gyy = wp.sa * 2 * vy * (SAG_N0 + SAG_N1);
+      var gxy = wp.sp * 2 * vy * lv, gyx = wp.sa * wmax * SAG_N1 * 1.5 * wp.gs;
+      var gr = Math.max(gxx, gyy) + (gxy + gyx) / 2;
+      if (gr > GRAV_J) { var f = GRAV_J / gr; wp.sa *= f; wp.sp *= f; gxy *= f; gyx *= f; }
+      // sigma_max of [[1, b], [c, 1]]
+      var T2 = 2 + gxy * gxy + gyx * gyx, D2 = 1 - gxy * gyx;
+      var sg = Math.sqrt((T2 + Math.sqrt(Math.max(0, T2 * T2 - 4 * D2 * D2))) / 2);
+      J = sg + jf;
+    }
+    o.jf = jf;
+
+    // beads on the drip-free skeleton, then the drips (none at Drip 0), then
+    // the skeleton with the drips added right after the main group
+    var nkB = neckAmp > 0 ? neckLattice(skB, bbB, neckAmp, o.sag, o.seed, o.melt) : null;
+    var plan = o.drip > 0 ? planDrips(skB, bbB, nkB, o) : null;
+    var sk = skB, nk = nkB, low = [];
+    if (plan) {
+      var at = -1, grp = 0, seen = false, add = [];
+      for (var ci = 0; ci < chains.length; ci++) {
+        var ch = chains[ci];
+        if (!ch || !ch.length) continue;
+        if (ch[0].length > 3 && ch[0][3] === 1 && seen) grp++;
+        seen = true;
+        if (grp === 0) at = ci;
+      }
+      plan.forEach(function (D) { add.push(D.chains[0], D.chains[1]); if (D.low) low.push(D); });
+      sk = buildSkeleton(chains.slice(0, at + 1).concat(add, chains.slice(at + 1)), o.mass);
+      var dLo = -1, dHi = -1;
+      sk.chains.forEach(function (C) { if (C.drip) { if (dLo < 0) dLo = C.c0; dHi = C.c1; } });
+      o.dLo = dLo; o.dHi = dHi;
+      if (nkB) nk = shiftLattice(nkB, dLo, dHi - dLo);
+    }
 
     var bb = skeletonBounds(sk);
-    // Lipschitz bound of the field: 1 for plain distance, plus the steepest
-    // radius taper, plus the noise slope (|grad valueNoise| <= 2.12/unit).
-    var taper = 0;
+    // Lipschitz bound of the field. Inside a capsule's slab the distance
+    // gradient is perpendicular to the axis and the radius term's runs along
+    // it, so |grad| <= sqrt(1 + (dr/ds)^2) with dr/ds the steepest taper or
+    // bead slope (in the end caps it is 1; a drip's neck has no taper). The
+    // sag's shrunken dy can only lower it. Plus the wobble's slope: hash2
+    // never sets the top bit (an int32 x ^ (x >> 16) is never negative), so
+    // valueNoise lies in [0, 0.5) and its slope is at most 1.5 * 0.5 per
+    // lattice unit; the two octaves (x grain, x 2.3 grain at half weight)
+    // give 0.75 + 0.86 = 1.61 * grain (a stretched y only lowers it). Plus
+    // the gap rule's slope: across a gap d + pm is nearly constant, so it adds
+    // at most GAP_LIP. All of it times the warp's |I - J_D|.
+    var taper = 0, rmax = 0;
     for (var i = 0; i < sk.length; i += STRIDE) {
       var len = Math.hypot(sk[i + 3] - sk[i], sk[i + 4] - sk[i + 1]);
       if (len > 1e-9) taper = Math.max(taper, Math.abs(sk[i + 5] - sk[i + 2]) / len);
+      rmax = Math.max(rmax, sk[i + 2], sk[i + 5]);
     }
-    o.lip = (1 + Math.min(taper, 3)) * 1.02 + o.wobble * o.grain * 4.6;
-    // headroom for melt bulge, tension inflation and noise displacement
-    var pad = o.melt * 0.5 + Math.abs(o.tension) + o.wobble + o.res * 3;
-    var bounds = [bb[0] - pad, bb[1] - pad, bb[2] + pad, bb[3] + pad];
+    if (nk) taper = Math.max(taper, nk.slope);
+    taper = Math.min(taper, 3);
+    // the curve fade varies across the stroke: |d m_eff| <= |m| *
+    // INNER_CUT / (2 r) per unit, times r -- it adds to the across-axis slope
+    var across = 1 + (nk ? nk.aabs * INNER_CUT * 0.5 : 0);
+    o.lip = Math.sqrt(across * across + taper * taper) * 1.02 + o.wobble * o.grain * 1.65 + (o.melt > 1e-6 ? GAP_LIP : 0);
+    o.sagX = SAG_X * o.sag;
+    o.bb = bbB;
+    // headroom for melt bulge, tension inflation, noise displacement, beads,
+    // the sag's fuller underside and the warp's slide
+    var warpPad = wp ? wp.ax + wp.ay + (wp.sa * (SAG_N0 + SAG_N1) + wp.sp * LEVER_C * 2 / 3) * (1 + RAMP_C) : 0;
+    var pad = o.melt * 0.5 + Math.abs(o.tension) + o.wobble + o.res * 3 +
+      rmax * ((nk ? nk.apos : 0) + o.sagX * (1 + (nk ? nk.apos : 0))) + warpPad;
+    // the far edges snap to whole cells from the near ones, so drips (which
+    // only reach down) leave the base glyph's sampling grid where it was
+    var x0 = Math.min(bb[0], bbB[0]) - pad, y0 = Math.min(bb[1], bbB[1]) - pad;
+    var bounds = [x0, y0, x0 + Math.ceil((Math.max(bb[2], bbB[2]) + pad - x0) / o.res) * o.res,
+      y0 + Math.ceil((Math.max(bb[3], bbB[3]) + pad - y0) / o.res) * o.res];
+    if (wp) {
+      warpTables(wp, bounds, o.seed);
+      o.warp = wp;
+      o.lip *= J;
+    }
+    if (opts._lip != null) o.lip = opts._lip;   // test hook: 0 samples every grid point
 
-    var field = makeField(sk, o, bounds);
-    return ringsFromField(field, bounds, o, opts._debug);
+    var field = makeField(sk, o, bounds, nk);
+    var rings = ringsFromField(field, bounds, o, opts._debug);
+    var foot = low.length && Array.isArray(rings) ? computeFoot(rings, low, field, o.res, o.melt > 1e-6 ? o.melt : 0) : null;
+    return { rings: rings, foot: foot, drips: { low: low.length, high: plan ? plan.length - low.length : 0, list: plan || [] } };
   }
+  function glyphRings(chains, opts) { return glyphTrace(chains, opts).rings; }
+  var WARP_MAX = 8;     // warp amplitude (glyph units) at Flow 1, warp 1
+  var NECK_MAX = 0.4;   // neck amplitude at Flow 1, neck 1
+  var SAG_X = 0.2;      // cross-section stretch below the axis at sag 1
+  var SAG_W = 9;        // downward slide (glyph units) at the foot at sag 1
+  var SAG_SPREAD = 5;   // sideways spread of the foot at sag 1
+  var SAG_TOP = 0.3;    // the top of a glyph that gravity leaves alone
+  var RAMP_C = 0.3;     // the ramp eases flat over v in [1, 1.3], below the ink
+  var LEVER_C = 2.25;   // the spread's lever eases flat at 2.25 half-widths
+  var SAG_N0 = 0.55, SAG_N1 = 0.9, SAG_GS = 0.011;   // per-column droop: range, frequency
+  var FLOW_J = 0.35;    // cap on |J_flow|, the flow's Jacobian norm
+  var GRAV_J = 0.45;    // cap on gravity's stretch + shear (FLOW_J + GRAV_J < 1)
 
   // Generic entry point: trace any scalar field(x,y) -> number (negative =
   // inside) over `bounds` = [x0,y0,x1,y1]. Lets callers build their own field
@@ -1593,6 +2447,7 @@ select {
     ringToCubics: ringToCubics,
     simplifyForCurves: simplifyForCurves,
     glyphRings: glyphRings,
+    glyphTrace: glyphTrace,
     signedArea: signedArea,
     traceField: traceField,
     valueNoise: valueNoise,
@@ -2606,7 +3461,10 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     bubble:  { mass: 0.94, melt:  7, tension: -7, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
     goo:     { mass: 1.10, melt: 20, tension:  0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
   };
-  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
+  // flow and drip have sliders; warp, neck, sag, dripForm and stretch are the
+  // Flow preset's own liquid physics and travel with the project
+  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res',
+    'flow', 'warp', 'neck', 'sag', 'drip', 'dripForm', 'stretch'];
 
   // preview inks, a tonal ramp; black flips the previews to paper
   var PALETTE = ['#ffffff', '#c4c4c4', '#8a8a8a', '#000000'];
@@ -2703,7 +3561,8 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
   function shapeKey() {
     var s = state, L = GC.LAYOUT;
-    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res, s.seed, s.draft ? 'd' : '',
+    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res,
+      s.flow, s.warp, s.neck, s.sag, s.drip, s.dripForm, s.stretch, s.seed, s.draft ? 'd' : '',
       L.scale, L.gapTop, L.gapStack, L.gapBottom].join('|');
   }
   function verOf(L) { return (isMark(L) ? 0 : globalVer) + '.' + letterVer[L]; }
@@ -2718,18 +3577,35 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var t = Object.prototype.hasOwnProperty.call(TUNE, key) && TUNE[key];
     return state.melt * (t && t.melt > 0 ? t.melt : 1);
   }
-  function traceChains(chains, key, tag) {
-    var k = 't|' + key + '|' + tag;
+  // Drips hang only from letters and figures: never from a mark, a dot or
+  // punctuation, nor from a letter carrying a mark below it (noDrip), whose
+  // dot or cedilla would land in the drip.
+  function dripsFor(key, noDrip) {
+    return noDrip || !(ALNUM.test(key) || OWN_CAPS.indexOf(key) >= 0) ? 0 : state.drip;
+  }
+  // Each traced ring set remembers its drip-free foot (the ink bottom with
+  // drips left out), so drips never move the measured baseline.
+  var FOOT = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function footOf(rings) {
+    var f = FOOT && FOOT.get(rings), b = GC.bbox(rings);
+    return f != null ? f : (b ? b[3] : null);
+  }
+  function traceChains(chains, key, tag, noDrip) {
+    var k = 't|' + key + '|' + tag + (noDrip ? '|nd' : '');
     if (cache[k]) return cache[k];
     var r;
     try {
-      r = BlobEngine.glyphRings(GC.markChains(key, chains), GC.traceOpts(key, {
+      var t = BlobEngine.glyphTrace(GC.markChains(key, chains), GC.traceOpts(key, {
         mass: state.mass, melt: meltFor(key), tension: state.tension, wobble: state.wobble,
         grain: state.grain, smooth: state.smooth, simplify: 0.3,
+        flow: state.flow, warp: state.warp, neck: state.neck, sag: state.sag,
+        drip: dripsFor(key, noDrip), dripForm: state.dripForm, stretch: state.stretch,
         // while a slider is being dragged, trace coarser and refine on release
         res: state.draft ? state.res * 1.7 : state.res,
         seed: state.seed + key.charCodeAt(0) * 13,
       }));
+      r = t.rings;
+      if (FOOT && t.foot != null) FOOT.set(r, t.foot);
     } catch (e) { console.error('glyph failed', key, e); r = []; }
     return remember(k, r);
   }
@@ -2739,9 +3615,13 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var tag = shapeKey() + '@' + [p.base].concat(p.fused, p.top, p.bottom).map(verOf).join(',');
     var k = 'c|' + L + '|' + tag;
     if (cache[k]) return cache[k];
+    var below = p.bottom.length > 0;   // a dot below / cedilla: the base must not drip into it
     return remember(k, GC.compose(L, {
-      rings: ringsOf, chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
-      trace: function (ch, key) { return traceChains(ch, key, tag); },
+      rings: function (key) {
+        return below && key === p.base && FLAT[key] ? traceChains(chainsOf(key), key, shapeKey() + '@' + verOf(key), true) : ringsOf(key);
+      },
+      chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
+      trace: function (ch, key) { return traceChains(ch, key, tag, below); },
     }, hasKey));
   }
   function ringsOf(L) {
@@ -2785,7 +3665,10 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     }
     return d;
   }
-  function gid(L) { return 'g' + Array.from(L).map(function (c) { return c.codePointAt(0).toString(16); }).join('_'); }
+  var GIDS = Object.create(null);
+  function gid(L) {
+    return GIDS[L] || (GIDS[L] = 'g' + Array.from(L).map(function (c) { return c.codePointAt(0).toString(16); }).join('_'));
+  }
 
   // ---------------------------------------------------------------- metrics
   // Baseline and cap height are measured from the rendered ink, not taken
@@ -2795,7 +3678,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
   function measureMetrics() {
     var bot = [], top = [];
-    Array.from('HIELNMKTFZ').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) bot.push(b[3]); });
+    Array.from('HIELNMKTFZ').forEach(function (L) { var f = FLAT[L] && footOf(ringsOf(L)); if (f != null && f !== false) bot.push(f); });
     Array.from('HIETFZBDPRKL').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) top.push(b[1]); });
     MET.base = bot.length ? median(bot) : GH;
     MET.cap = top.length ? median(top) : 0;
@@ -2872,7 +3755,8 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var lsb = sp * (1 - k * dl), rsb = sp * (1 - k * dr);
     var adj = own(state.metrics, L) && state.metrics[L];
     if (adj) { lsb += adj[0]; rsb += adj[1]; }
-    return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi });
+    var full = comp ? GC.bbox(rings) : bb;   // top: how high its ink reaches, marks included
+    return (SPC[L] = { x0: bb[0], x1: bb[2], lsb: lsb, rsb: rsb, adv: lsb + bb[2] - bb[0] + rsb, lo: pr.lo, hi: pr.hi, top: full ? full[1] : MET.cap });
   }
   // Kerning is only about how two shapes meet; how much white one side
   // carries on its own is the sidebearings' job (white area adds up row by
@@ -2942,9 +3826,30 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
 
   // ------------------------------------------------------------------ state
+  // a block's id is stable for the session: undo snapshots carry it, so a
+  // block that comes back is the same block (and keeps its caret) — never
+  // "whichever block now sits in that position"
   var uid = 0;
-  function block(text, size, lh, tr, paper) {
-    return { id: ++uid, text: text, size: size, lh: lh, tr: tr, paper: !!paper, editing: false };
+  // Preview caps, one set for everything: typing stops at BLOCK_MAX a block
+  // and TEXT_BUDGET in all; Add block and the proofs may put their short
+  // fixed strings on top, up to FIXED_SLACK more, and at most MAX_BLOCKS
+  // blocks. A project file (and the autosave) keeps exactly that much, so
+  // whatever you can make here comes back whole after a reload.
+  var BLOCK_MAX = 5000, TEXT_BUDGET = 20000, FIXED_SLACK = 2000, MAX_BLOCKS = 40;
+  function previewChars(but) {
+    var n = 0;
+    state.blocks.forEach(function (x) { if (x !== but) n += x.text.length; });
+    return n;
+  }
+  // room for n more blocks holding `chars` characters of fixed text
+  function roomFor(n, chars) {
+    if (state.blocks.length + n > MAX_BLOCKS) { toast('That makes more than ' + MAX_BLOCKS + ' preview blocks — remove one first', 3200); return false; }
+    if (previewChars() + chars > TEXT_BUDGET + FIXED_SLACK) { toast('Preview text is full — shorten a block first', 3200); return false; }
+    return true;
+  }
+  function block(text, size, lh, tr, paper, id) {
+    if (id > uid) uid = id;
+    return { id: id > 0 ? id : ++uid, text: text, size: size, lh: lh, tr: tr, paper: !!paper };
   }
   function defaultBlocks() {
     return [
@@ -3102,27 +4007,228 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     return svg;
   }
 
+  // ------------------------------------------------------------ text layout
+  // One layout serves the live previews (glyphs, caret, selection) and the
+  // SVG / PNG specimen, so what is typed, what is shown and what is exported
+  // always agree. Text is split into clusters — a base character with its
+  // combining marks — which are also the caret's steps.
+  // Whitespace: every space or tab is one word space and nothing collapses
+  // (two spaces show as two); '\n' is a hard line break. Lines wrap between
+  // words; the space where a line wraps hangs past the right edge (it takes
+  // no room) and the next line starts with the next word. More spaces than
+  // that wrap with it, as CSS break-spaces does: a run of spaces typed at
+  // the edge, or a line of nothing but spaces, flows on to the next line,
+  // so every space still moves the caret. A word wider than
+  // the column shrinks the block to fit (down to 8px); one still too wide
+  // at that size breaks between letters. Tracking goes between neighbouring
+  // glyphs of a word, kerning between two drawn ones; a character the font
+  // can't draw yet is a dashed box (one box for a whole emoji, flag or ZWJ
+  // sequence, which is also one caret step).
+  var TOKEN_RE = /\n|[^\S\n]|\P{M}\p{M}*|\p{M}+/gu, NOTDEF_EM = 0.42;
+  var SEG = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  // text the mark-based split can get wrong: ZWJ, astral planes, scripts with conjuncts
+  var COMPLEX_RE = /[\u200c\u200d]|[^\u0000-\u024f\u0300-\u036f\u1e00-\u1eff\u2010-\u205f\u20a0-\u20bf]/;
+  // start offsets of the grapheme clusters, or null when they are the
+  // mark-based clusters anyway
+  function graphemeStarts(text) {
+    if (!SEG || !COMPLEX_RE.test(text)) return null;
+    var out = Object.create(null);
+    for (var seg of SEG.segment(text)) out[seg.index] = 1;
+    return out;
+  }
+  function newLine() { return { items: [], glyphs: [], w: 0, br: null }; }
+  var CLUSTERS = Object.create(null), nClusters = 0;
+  function cacheClusters(s) {
+    if (++nClusters > 4000) { CLUSTERS = Object.create(null); nClusters = 0; }
+    return (CLUSTERS[s] = GC.clusters(s));
+  }
+  function layoutText(text, size, tr, maxW, fit) {
+    var toks = [], m, i, j, t, wd = null, widest = 0, em = MET.em;
+    // pass 1: tokens, and every word measured in em (size-free, so a fit is exact)
+    var gb = graphemeStarts(text);
+    TOKEN_RE.lastIndex = 0;
+    while ((m = TOKEN_RE.exec(text))) {
+      var s = m[0], kind = s === '\n' ? 'br' : /^\s$/.test(s) ? 'sp' : 'g';
+      if (gb && kind === 'g' && !gb[m.index] && t && t.t === 'g' && t.o1 === m.index) t.o1 += s.length;   // the rest of a grapheme
+      else {
+        t = { t: kind, o0: m.index, o1: m.index + s.length, x0: 0, x1: 0 };
+        toks.push(t);
+        if (kind !== 'g') { wd = null; continue; }
+        if (!wd) wd = { i0: toks.length - 1, w: 0, prev: null, n: 0 };
+        t.word = wd; t.gl = [];
+      }
+      var Ls = CLUSTERS[s] || cacheClusters(s);   // usually one; ß gives S S
+      for (j = 0; j < Ls.length; j++) {
+        var L = Ls[j], draw = canDraw(L), g;
+        if (!draw && t.gl.length && t.gl[t.gl.length - 1].notdef) continue;   // one box per grapheme
+        if (wd.n) wd.w += tr + (draw && wd.prev ? kernOf(wd.prev, L) / em : 0);
+        g = draw ? { L: L, e: wd.w, s: spacingOf(L) } : { notdef: true, e: wd.w };
+        wd.w += draw ? g.s.adv / em : NOTDEF_EM;
+        wd.prev = draw ? L : null; wd.n++;
+        t.gl.push(g);
+      }
+      t.e1 = wd.w;
+      if (wd.w > widest) widest = wd.w;
+    }
+    // on a narrow column a big word can be wider than the block: shrink the
+    // rendering (not the setting) so the longest word still fits
+    if (fit && maxW > 0 && widest * size > maxW) size = Math.max(8, Math.floor(maxW / widest));
+    // pass 2: place in px, wrapping between words
+    var k = size / em, spW = (wordEm() + tr) * size, lines = [], line = newLine(), x = 0, hasWord = false, wx = 0;
+    for (i = 0; i < toks.length; i++) {
+      t = toks[i];
+      if (t.t === 'br') {
+        t.x0 = t.x1 = x; line.items.push(t); line.br = t;
+        lines.push(line); line = newLine(); x = 0; hasWord = false;
+        continue;
+      }
+      if (t.t === 'sp') {
+        // a space that would start past the edge goes to the next line
+        if (x >= maxW && line.items.length) { lines.push(line); line = newLine(); x = 0; hasWord = false; }
+        t.x0 = x; x += spW; t.x1 = x; line.items.push(t); continue;
+      }
+      wd = t.word;
+      if (wd.i0 === i) {
+        // a word that doesn't fit after what is on the line (words, or the
+        // spaces that open it) starts the next one
+        if ((hasWord || x > 0) && x + wd.w * size > maxW) { lines.push(line); line = newLine(); x = 0; }
+        hasWord = true; wx = x;
+        wd.brk = wd.w * size > maxW;   // too wide even at the fitted size: breaks between letters
+      } else if (wd.brk && wx + t.e1 * size > maxW && line.glyphs.length) {
+        lines.push(line); line = newLine(); wx = -t.gl[0].e * size;
+      }
+      x = wx + (wd.brk ? t.e1 : wd.w) * size; line.w = x;
+      for (j = 0; j < t.gl.length; j++) {
+        var q = t.gl[j], gx = wx + q.e * size;
+        line.glyphs.push(q.notdef ? { notdef: true, x: gx, w: NOTDEF_EM * size } : { L: q.L, x: gx, s: q.s });
+      }
+      t.x0 = wx + t.gl[0].e * size; t.x1 = wx + t.e1 * size;
+      line.items.push(t);
+    }
+    lines.push(line);
+    // caret stops: every cluster boundary, each on exactly one line, at the
+    // middle of the kerning/tracking gap between its two neighbours
+    var pos = new Array(text.length + 1), stops = [];
+    for (i = 0; i < lines.length; i++) {
+      var ln = lines[i], it = ln.items;
+      ln.stops = [];
+      for (j = 0; j < it.length; j++) ln.stops.push([it[j].o0, j ? (it[j - 1].x1 + it[j].x0) / 2 : it[j].x0]);
+      ln.end = ln.br ? ln.br.x0 : it.length ? it[it.length - 1].x1 : 0;
+      if (i === lines.length - 1) ln.stops.push([text.length, ln.end]);
+      ln.o0 = ln.stops[0][0];
+      for (j = 0; j < ln.stops.length; j++) { pos[ln.stops[j][0]] = [i, ln.stops[j][1]]; stops.push(ln.stops[j][0]); }
+    }
+    for (i = 0; i < lines.length; i++) lines[i].o1 = i + 1 < lines.length ? lines[i + 1].o0 : text.length;
+    return { text: text, size: size, k: k, maxW: maxW, lines: lines, toks: toks, stops: stops, pos: pos };
+  }
+  // index of the last entry <= o in an ascending list (0 when none is)
+  function lowerIdx(arr, o, key) {
+    var lo = 0, hi = arr.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi + 1) >> 1, v = key ? arr[mid][key] : arr[mid];
+      if (v <= o) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
   // --------------------------------------------------------- tester blocks
   var resizeT = null;
   window.addEventListener('resize', function () {
     clearTimeout(resizeT);
-    resizeT = setTimeout(repaintAllTesters, 160);   // long words re-fit the column
+    resizeT = setTimeout(function () {
+      // back from the phone layout (where the page itself scrolls) to the
+      // desktop one (where it can't): a page scroll left over would hide the app
+      var se = document.scrollingElement;
+      if (se && se.scrollTop && getComputedStyle(document.documentElement).overflowY === 'hidden') se.scrollTop = 0;
+      repaintAllTesters();   // lines re-wrap to the new column
+    }, 160);
   });
-  function renderTesters(focusBlock) {
+  var activeEd = null;   // the preview whose text has focus
+  // The list is reconciled by block, not rebuilt: a block that is still
+  // there keeps its DOM (and, if you are typing in it, its focus), new
+  // blocks are built, removed ones dropped. Nothing ever goes by position,
+  // so an undo that puts a block back can't hand your caret to its
+  // neighbour.
+  function renderTesters(focusBlock, mode) {
     var scroller = $('specimenScroll'), keep = scroller.scrollTop;
-    testerList.innerHTML = '';
-    state.blocks.forEach(function (b) { testerList.appendChild(buildTester(b)); });
+    // the textarea still shows the text from before this render (an undo
+    // may already have changed the block), so that is what the caret is in
+    var was = activeEd && activeEd.root.parentNode === testerList ? activeEd : null, wasSel = null, wasText = '';
+    if (was) { wasText = was.ta.value; wasSel = [was.ta.selectionStart, was.ta.selectionEnd, was.ta.selectionDirection]; }
+    var old = {}, kids = Array.prototype.slice.call(testerList.children);
+    kids.forEach(function (r) { if (r.liquidEd) old[r.liquidEd.b.id] = r; });
+    var next = state.blocks.map(function (b) {
+      var r = old[b.id];
+      if (r && r.liquidEd.b === b) { delete old[b.id]; r.liquidSync(); return r; }
+      return buildTester(b);
+    });
+    // drop what is gone first, so the blocks that stay are never moved
+    // (moving the focused one would blur it)
+    kids.forEach(function (r) { if (next.indexOf(r) < 0) testerList.removeChild(r); });
+    next.forEach(function (r, i) { if (testerList.children[i] !== r) testerList.insertBefore(r, testerList.children[i] || null); });
+    var landing = null, lost = false;
+    if (was && was.root.parentNode !== testerList) {
+      // the block you were typing in went away (an undo took it back): focus
+      // lands on the nearest block that is still there — the block itself,
+      // not its text, so the next key edits nothing — and never on <body>,
+      // where the keyboard would lose its place
+      var at = kids.indexOf(was.root);
+      for (var d = 1; !landing && d < kids.length; d++) {
+        [kids[at + d], kids[at - d]].forEach(function (r) { if (!landing && r && r.parentNode === testerList) landing = r; });
+      }
+      activeEd = null; was = null; lost = true;
+    }
     if (!state.blocks.length) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
       empty.textContent = 'No preview blocks. Add one below to type with your font.';
       testerList.appendChild(empty);
     }
+    labelTesters();
+    repaintAllTesters();
     scroller.scrollTop = keep;   // rebuilding the list must not jump the view
+    var el, ed;
     if (focusBlock) {
-      var i = state.blocks.indexOf(focusBlock), el = testerList.children[i];
-      if (el) { el.scrollIntoView({ block: 'nearest' }); var t = el.querySelector('.tester-text'); if (t) t.focus({ preventScroll: true }); }
+      el = testerList.children[state.blocks.indexOf(focusBlock)];
+      if (!el) return;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+      ed = el.liquidEd;
+      if (mode === 'type' && ed) ed.focusAt(0, ed.ta.value.length);   // a new block: typing replaces its text
+      else { var del = el.querySelector('.tester-del'); if (del) del.focus({ preventScroll: true }); }
+    } else if (was) {   // still the same block and element: keep (or re-place) its caret
+      ed = was;
+      if (ed.b.text === wasText) ed.focusAt(wasSel[0], wasSel[1], wasSel[2]);
+      else { var c = changedEnd(wasText, ed.b.text); ed.focusAt(c, c); }
+    } else if (lost) {   // (no block left: the Add block button)
+      (landing || $('btnAddBlock')).focus({ preventScroll: true });
     }
+  }
+  // each preview's textarea gets its own name, so a screen reader can tell
+  // the blocks apart
+  function labelTesters() {
+    var n = state.blocks.length;
+    Array.prototype.forEach.call(testerList.children, function (r, i) {
+      if (r.liquidEd) r.liquidEd.ta.setAttribute('aria-label', 'Preview text ' + (i + 1) + ' of ' + n + ', ' + Math.round(r.liquidEd.b.size) + ' px');
+    });
+  }
+  function edOf(b) {
+    for (var c = testerList.firstChild; c; c = c.nextSibling) if (c.liquidEd && c.liquidEd.b === b) return c.liquidEd;
+    return null;
+  }
+  // new text for one block from outside its textarea (undo / redo)
+  function setBlockText(b, text) {
+    var ed = edOf(b), was = b.text;
+    b.text = text;
+    if (!ed) return;
+    ed.paint();
+    if (ed === activeEd) { var c = changedEnd(was, text); ed.focusAt(c, c); }
+  }
+  // where an edit ended: the end of what differs between two texts
+  function changedEnd(a, b) {
+    var p = 0, n = Math.min(a.length, b.length), q = 0;
+    while (p < n && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+    while (q < n - p && a.charCodeAt(a.length - 1 - q) === b.charCodeAt(b.length - 1 - q)) q++;
+    return b.length - q;
   }
 
   function ctrl(label, min, max, step, val, fmt, onInput) {
@@ -3145,14 +4251,15 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     });
     r.addEventListener('change', function () { armed = false; markDirty(); });
     wrap.appendChild(t); wrap.appendChild(b); wrap.appendChild(r);
+    wrap.liquidSet = function (v) { r.value = v; b.textContent = fmt(v); };   // an undo put a value back
     return wrap;
   }
 
   function buildTester(b) {
     var root = document.createElement('div');
     // black ink would vanish on the black specimen, so it prints on paper
-    var onPaper = b.paper || state.ink === '#000000';
-    root.className = 'tester' + (onPaper ? ' paper' : '');
+    root.className = 'tester';
+    root.tabIndex = -1;   // where Esc leaves you: Tab then goes to this block's controls, Enter back into its text
 
     var head = document.createElement('div');
     head.className = 'tester-head';
@@ -3163,36 +4270,38 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     name.dataset.role = 'name';
     head.appendChild(name);
 
-    head.appendChild(ctrl('Size', 10, 480, 1, b.size, function (v) { return Math.round(v) + 'px'; },
-      function (v) { b.size = v; paintText(root, b); }));
-    head.appendChild(ctrl('Leading', 70, 220, 1, b.lh, function (v) { return Math.round(v) + '%'; },
-      function (v) { b.lh = v; paintText(root, b); }));
-    head.appendChild(ctrl('Tracking', -0.06, 0.4, 0.005, b.tr, function (v) { return v.toFixed(3) + 'em'; },
-      function (v) { b.tr = v; paintText(root, b); }));
+    var cSize = ctrl('Size', 10, 480, 1, b.size, function (v) { return Math.round(v) + 'px'; },
+      function (v) { b.size = v; paintText(root, b); labelTesters(); });
+    var cLh = ctrl('Leading', 70, 220, 1, b.lh, function (v) { return Math.round(v) + '%'; },
+      function (v) { b.lh = v; paintText(root, b); });
+    var cTr = ctrl('Tracking', -0.06, 0.4, 0.005, b.tr, function (v) { return v.toFixed(3) + 'em'; },
+      function (v) { b.tr = v; paintText(root, b); });
+    head.appendChild(cSize); head.appendChild(cLh); head.appendChild(cTr);
 
     var sp = document.createElement('div'); sp.className = 'tester-spacer';
     head.appendChild(sp);
 
     var inv = document.createElement('button');
     inv.type = 'button';
-    inv.className = 'mini-btn' + (b.paper ? ' on' : '');
-    inv.textContent = b.paper ? 'Paper' : 'Ink';
-    inv.setAttribute('aria-pressed', String(b.paper));
     inv.title = 'Switch between ink on black and black on paper';
+    function syncPaper() {
+      root.classList.toggle('paper', b.paper || state.ink === '#000000');
+      inv.className = 'mini-btn' + (b.paper ? ' on' : '');
+      inv.textContent = b.paper ? 'Paper' : 'Ink';
+      inv.setAttribute('aria-pressed', String(b.paper));
+    }
+    syncPaper();
     inv.addEventListener('click', function () {
       pushUndo();
       b.paper = !b.paper;
-      root.classList.toggle('paper', b.paper);
-      inv.classList.toggle('on', b.paper);
-      inv.textContent = b.paper ? 'Paper' : 'Ink';
-      inv.setAttribute('aria-pressed', String(b.paper));
+      syncPaper();
       paintText(root, b); markDirty();
     });
     head.appendChild(inv);
 
     var del = document.createElement('button');
     del.type = 'button';
-    del.className = 'mini-btn';
+    del.className = 'mini-btn tester-del';
     del.textContent = '×';
     del.title = 'Remove this block';
     del.setAttribute('aria-label', 'Remove this preview block');
@@ -3210,118 +4319,601 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var body = document.createElement('div');
     body.className = 'tester-body';
     root.appendChild(body);
-
-    paintText(root, b);
+    makeEditor(root, body, b);   // painted once it is in the document and has a width
+    // a kept block picks up what changed around it (undo, font name, ink);
+    // its text follows in the repaint
+    root.liquidSync = function () {
+      name.textContent = state.fontName;
+      cSize.liquidSet(b.size); cLh.liquidSet(b.lh); cTr.liquidSet(b.tr);
+      syncPaper();
+    };
     return root;
   }
+  // re-layout one block (size, leading, tracking, ink changed)
+  function paintText(root) {
+    var ed = root.liquidEd;
+    if (ed) ed.paint(ed.surface.clientWidth);
+  }
 
-  var lastMissing = '';
-  function paintText(root, b) {
-    var body = root.querySelector('.tester-body');
-    body.innerHTML = '';
+  // ------------------------------------------------------ live preview text
+  // Every preview is typed into directly. The glyphs are one SVG of <use>s
+  // of the shared defs, laid out by layoutText; the keys go to an invisible
+  // native <textarea> parked at the caret, so IME composition (Telex, VNI,
+  // macOS Vietnamese, dead keys, mobile keyboards), paste, the clipboard and
+  // screen readers work as in any text field, and the IME's candidate window
+  // opens where you type. Caret, selection and the arrow keys follow the
+  // drawn layout cluster by cluster: an accented letter is one step, and the
+  // caret never lands between a letter and its marks.
+  //
+  // Undo is the app's, never the textarea's: each typing burst (the first
+  // edit after focusing, after a pause or after moving the caret; each paste
+  // or cut) is one step on the same stack as glyph edits, and Ctrl/⌘Z or
+  // Edit › Undo in a preview goes to it.
+  var IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+  var PLACEHOLDER = 'Type here', BURST_MS = 1000;
+  function inkOf(b) { return b.paper || state.ink === '#000000' ? '#000' : state.ink; }
+  // Selection and placeholder colours, worked out from the ink and the
+  // ground with the WCAG contrast formula (not a fixed tint, which faded to
+  // ~1.3:1 on the grey ink): the selection stands >= 3:1 off the ground and
+  // the ink >= 3:1 off the selection — on a grey ink that can only be a
+  // light selection under the letters — and the placeholder >= 3:1 off the
+  // ground. Colours are mixed the way the browser blends them (in sRGB).
+  var MIN_CONTRAST = 3.2;   // 3:1, with a margin for rounding
+  function rgbOf(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) h = h.replace(/./g, '$&$&');
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lumOf(c) {
+    var f = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  }
+  function contrastOf(a, b) { var x = lumOf(a), y = lumOf(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mixOf(a, b, t) { return a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); }); }
+  function inkTones(ink, ground) {
+    var I = rgbOf(ink), G = rgbOf(ground), far = lumOf(G) < 0.5 ? [255, 255, 255] : [0, 0, 0], t, best = null, bestScore = -1;
+    for (t = 0.05; t <= 1.0001; t += 0.01) {   // selection: the nearest-to-ground colour that passes both
+      var S = mixOf(G, far, t), score = Math.min(contrastOf(S, G), contrastOf(I, S));
+      if (score >= MIN_CONTRAST) { best = S; break; }
+      if (score > bestScore) { bestScore = score; best = S; }
+    }
+    var ph = 1;
+    for (t = 0.2; t <= 1.0001; t += 0.01) if (contrastOf(mixOf(G, I, t), G) >= MIN_CONTRAST) { ph = t; break; }
+    return { sel: 'rgb(' + best.join(',') + ')', ph: Math.min(1, ph).toFixed(2) };
+  }
+  // Room above the first line for the font's ascender (ASC_EM: its tallest
+  // stacked Vietnamese capital), whatever the text — the way a line box
+  // keeps a font's ascent, and the way the export lays a block out. Room
+  // that came and went with the text made the block jump down at the first
+  // accent typed, and back up on leaving it.
+  function headroomOf(size, L, capH) { return Math.max(0, (ASC_EM + 0.02) * size - (L + capH) / 2); }
+  document.addEventListener('selectionchange', function () { if (activeEd) activeEd.syncSel(); });
 
-    if (b.editing) {
-      var ta = document.createElement('textarea');
-      ta.className = 'tester-edit';
-      ta.value = b.text;
-      ta.setAttribute('aria-label', 'Preview text');
-      body.appendChild(ta);
-      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
-      var commit = function () {
-        if (!b.editing) return;
-        if (ta.value !== b.text) pushUndo();
-        b.text = ta.value; b.editing = false; paintText(root, b); markDirty();
-        reportMissing(b.text);
-      };
-      ta.addEventListener('blur', commit);
-      ta.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { b.editing = false; paintText(root, b); }
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commit();
+  function makeEditor(root, body, b) {
+    var surface = document.createElement('div');
+    surface.className = 'tester-text';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'tester-glyphs');
+    svg.setAttribute('aria-hidden', 'true');
+    var selG = document.createElementNS(NS, 'g');
+    selG.setAttribute('class', 'tester-sel');
+    var inkG = document.createElementNS(NS, 'g');
+    inkG.setAttribute('class', 'tester-ink');
+    inkG.setAttribute('fill', 'currentColor');
+    svg.appendChild(selG); svg.appendChild(inkG);
+    var caret = document.createElement('span');
+    caret.className = 'tester-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    var ta = document.createElement('textarea');
+    ta.className = 'tester-input';
+    ta.value = b.text;
+    ta.rows = 1;
+    ta.maxLength = BLOCK_MAX;   // the same cap a project file gets (narrowed to what the budget leaves on focus)
+    ta.setAttribute('aria-label', 'Preview text');
+    ta.setAttribute('placeholder', PLACEHOLDER);
+    ta.setAttribute('spellcheck', 'false');
+    ta.setAttribute('autocomplete', 'off');
+    ta.setAttribute('autocorrect', 'off');
+    ta.setAttribute('autocapitalize', 'off');
+    ta.setAttribute('wrap', 'off');
+    ta.setAttribute('data-gramm', 'false');   // grammar extensions stay out of it
+    surface.appendChild(svg); surface.appendChild(caret); surface.appendChild(ta);
+    body.appendChild(surface);
+
+    var ed = {
+      b: b, root: root, surface: surface, ta: ta, lay: null, maxW: 0, L: 0, capH: 0, padTop: 0,
+      focused: false, composing: false, compStart: 0, compLen: 0, burst: false, moved: false, lastEdit: 0,
+      goalX: null, sel: null, lastF: 0, raf: 0, needPaint: false, wantScroll: false, placing: false, winBlur: false,
+      flip: false, caretKey: '', selKey: '', missT: 0, ctx: null, ink: '',
+    };
+    root.liquidEd = ed;
+
+    // ---- drawing
+    function baseline(li) { return ed.padTop + li * ed.L + (ed.L + ed.capH) / 2; }
+    // One <g> per drawn line, its glyphs in line-local coordinates, so a
+    // line that didn't change keeps its nodes and only moves: typing redraws
+    // the line under the caret, not the whole block.
+    function lineMarkup(gl, lay, by) {
+      var out = '', k = lay.k, sz = lay.size, capH = CAP_EM * sz, tail = ') scale(' + k.toFixed(5) + ')"/>';
+      var ty = (by - MET.base * k).toFixed(2);
+      for (var j = 0; j < gl.length; j++) {
+        var g = gl[j];
+        if (g.notdef) {
+          out += '<rect class="notdef" fill="none" x="' + (g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - capH).toFixed(1) +
+            '" width="' + (g.w * 0.8).toFixed(1) + '" height="' + capH.toFixed(1) + '" rx="' + (0.04 * sz).toFixed(1) + '"/>';
+          continue;
+        }
+        if (!FLAT[g.L]) ensureDef(g.L);
+        out += '<use href="#' + gid(g.L) + '" transform="translate(' + (g.x - (g.s.x0 - g.s.lsb) * k).toFixed(2) + ' ' + ty + tail;
+      }
+      return out;
+    }
+    function renderInk(lay) {
+      var by = (ed.L + ed.capH) / 2, pool = {}, next = [], i, c, m;
+      for (c = inkG.firstChild; c; c = c.nextSibling) (pool[c.liquidM] || (pool[c.liquidM] = [])).push(c);
+      for (i = 0; i < lay.lines.length; i++) {
+        m = lineMarkup(lay.lines[i].glyphs, lay, by);
+        c = pool[m] && pool[m].pop();
+        if (!c) { c = document.createElementNS(NS, 'g'); c.innerHTML = m; c.liquidM = m; }
+        var y = (ed.padTop + i * ed.L).toFixed(1);
+        if (c.liquidY !== y) { c.liquidY = y; c.setAttribute('transform', 'translate(0 ' + y + ')'); }
+        next.push(c);
+      }
+      for (i = 0; i < next.length; i++) if (inkG.childNodes[i] !== next[i]) inkG.insertBefore(next[i], inkG.childNodes[i] || null);
+      while (inkG.childNodes.length > next.length) inkG.removeChild(inkG.lastChild);
+    }
+    ed.paint = function (w) {
+      if (ed.raf) { cancelAnimationFrame(ed.raf); ed.raf = 0; }
+      ed.needPaint = false;
+      if (w !== undefined) ed.maxW = w;
+      var maxW = ed.maxW > 0 ? ed.maxW : (testerList.clientWidth > 100 ? testerList.clientWidth - 52 : 1000);
+      if (ta.value !== b.text && !ed.composing) ta.value = b.text;   // the textarea always holds the block's text
+      var text = b.text, lay = layoutText(text, b.size, b.tr, maxW, true);
+      var size = lay.size, L = b.lh / 100 * size, capH = CAP_EM * size;
+      ed.padTop = headroomOf(size, L, capH);
+      ed.lay = lay; ed.L = L; ed.capH = capH;
+      var ink = inkOf(b);
+      if (ink !== ed.ink) {   // selection and placeholder stay visible on a dim ink too
+        ed.ink = ink;
+        surface.style.color = ink;
+        var tones = inkTones(ink, ink === '#000' ? '#fff' : '#000');   // the ground: paper, or the black specimen
+        surface.style.setProperty('--sel-c', tones.sel);
+        surface.style.setProperty('--ph-a', tones.ph);
+      }
+      // an empty block keeps the height of one line
+      svg.setAttribute('height', (ed.padTop + lay.lines.length * L).toFixed(1));
+      var ph = null;
+      if (!text) {   // a muted placeholder in the font itself, kept to the one empty line
+        ph = layoutText(PLACEHOLDER, size, b.tr, Infinity, false);
+        var pw = ph.lines[0].w;
+        if (pw > maxW) ph = layoutText(PLACEHOLDER, Math.max(6, size * maxW / pw), b.tr, Infinity, false);
+      }
+      inkG.setAttribute('class', ph ? 'tester-ink is-ph' : 'tester-ink');
+      renderInk(ph || lay);
+      if (ed.focused && !ed.composing) snapSel();
+      overlay();
+    };
+    function queue(repaint) {
+      if (repaint) ed.needPaint = true;
+      if (ed.raf) return;
+      ed.raf = requestAnimationFrame(function () {
+        ed.raf = 0;
+        if (ed.needPaint) ed.paint(); else overlay();
       });
-      return;
+    }
+    function current() { if (!ed.lay || ed.lay.text !== ta.value || ed.needPaint) ed.paint(); return ed.lay; }
+
+    // offset -> [line, x] on the drawn layout (an offset inside a cluster
+    // reads as the boundary before it)
+    function locate(o) {
+      var lay = ed.lay, p = lay.pos[o];
+      if (p) return p;
+      return lay.pos[lay.stops[lowerIdx(lay.stops, o)]];
+    }
+    // x of a boundary on line li; the end of a line's text is that line's end
+    function xOn(li, o) {
+      var lines = ed.lay.lines, ln = lines[li];
+      return o >= ln.o1 && li < lines.length - 1 ? ln.end : locate(o)[1];
+    }
+    function overlay() {
+      var lay = ed.lay;
+      if (!lay) return;
+      if (lay.text !== ta.value) { queue(true); return; }
+      var s = ta.selectionStart, e = ta.selectionEnd, maxW = lay.maxW, sz = lay.size, capH = ed.capH, rects = '';
+      var cl = function (x) { return Math.max(0, Math.min(maxW, x)); };
+      if (ed.focused && e > s) {
+        var pad = Math.max(0, Math.min(0.14 * sz, (ed.L - capH) / 2));
+        for (var li = 0; li < lay.lines.length; li++) {
+          var ln = lay.lines[li], a = Math.max(s, ln.o0), z = Math.min(e, ln.o1);
+          if (z <= a) continue;
+          var x0 = cl(xOn(li, a)), x1 = cl(xOn(li, z));
+          if (ln.br && e >= ln.o1) x1 = cl(ln.end) + 0.25 * sz;   // the line break itself is selected
+          rects += '<rect x="' + x0.toFixed(1) + '" y="' + (baseline(li) - capH - pad).toFixed(1) + '" width="' +
+            Math.max(0, x1 - x0).toFixed(1) + '" height="' + (capH + 2 * pad).toFixed(1) + '"/>';
+        }
+      }
+      if (ed.focused && ed.composing && ed.compLen > 0) {   // the text an IME is still composing
+        var c0 = ed.compStart, c1 = Math.min(lay.text.length, c0 + ed.compLen), th = Math.max(1, 0.02 * sz);
+        for (var lj = 0; lj < lay.lines.length; lj++) {
+          var lm = lay.lines[lj], ca = Math.max(c0, lm.o0), cz = Math.min(c1, lm.o1);
+          if (cz <= ca) continue;
+          var u0 = cl(xOn(lj, ca)), u1 = cl(xOn(lj, cz));
+          rects += '<rect class="comp" x="' + u0.toFixed(1) + '" y="' + (baseline(lj) + 0.9 * DESC_EM * sz).toFixed(1) + '" width="' +
+            Math.max(0, u1 - u0).toFixed(1) + '" height="' + th.toFixed(1) + '"/>';   // under the dot below
+        }
+      }
+      if (rects !== ed.selKey) { ed.selKey = rects; selG.innerHTML = rects; }
+      // caret at the moving end of the selection; the textarea sits on it so
+      // an IME's candidate window and mobile scrolling land where you type
+      var f = Math.min(selAF()[1], lay.text.length), p = locate(f), by = baseline(p[0]);
+      var cw = Math.max(2, Math.round(sz / 40) / 2), cx = Math.max(0, Math.min(maxW - cw, p[1] - cw / 2));
+      caret.classList.toggle('on', ed.focused && s === e);
+      caret.style.width = cw + 'px';
+      caret.style.height = capH.toFixed(1) + 'px';
+      caret.style.transform = 'translate(' + cx.toFixed(1) + 'px,' + (by - capH).toFixed(1) + 'px)';
+      var key = cx.toFixed(1) + ',' + by.toFixed(1);
+      if (key !== ed.caretKey) {   // a moved caret shows solid, then blinks again
+        ed.caretKey = key;
+        caret.style.animationName = (ed.flip = !ed.flip) ? 'tester-blink-b' : 'tester-blink-a';
+      }
+      if (!ed.ctx) {   // (under the pointer while a right-click menu is open)
+        ta.style.left = Math.max(0, Math.min(maxW - 1, p[1])).toFixed(1) + 'px';
+        ta.style.top = Math.max(0, by - 1).toFixed(1) + 'px';
+      }
+      if (ed.wantScroll && ed.focused) {
+        ed.wantScroll = false;
+        if (caret.scrollIntoView) caret.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
     }
 
-    var holder = document.createElement('div');
-    holder.className = 'tester-text';
-    holder.style.lineHeight = (b.lh / 100);
-    holder.style.fontSize = b.size + 'px';
-    // stacked marks on the first line need headroom the leading doesn't give
-    if (/[\u0300-\u036f]/.test(b.text.normalize('NFD'))) holder.style.paddingTop = (0.2 * b.size).toFixed(1) + 'px';
-    holder.style.color = b.paper || state.ink === '#000000' ? '#000' : state.ink;
-    holder.title = 'Click to edit this text';
-    holder.tabIndex = 0;
-    holder.setAttribute('role', 'button');
-    holder.setAttribute('aria-label', 'Preview text: ' + b.text + '. Press Enter to edit.');
-    var edit = function () { b.editing = true; paintText(root, b); };
-    holder.addEventListener('click', edit);
-    holder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); edit(); } });
-    body.appendChild(holder);
-    fillText(holder, b.text, fitSize(b, body), b.tr);
-  }
-  // On a narrow screen a 200px word can be wider than the block; shrink the
-  // rendering (not the setting) so the longest word still fits.
-  function fitSize(b, body) {
-    var avail = (body.clientWidth || testerList.clientWidth - 52) - 2;
-    if (!(avail > 0)) return b.size;
-    var widest = 0;
-    b.text.split(/\s+/).forEach(function (w) {
-      var em = 0, prev = null;
-      GC.clusters(w).forEach(function (L) {
-        if (!canDraw(L)) { em += 0.42; prev = null; return; }
-        em += (spacingOf(L).adv + (prev ? kernOf(prev, L) : 0)) / MET.em + b.tr;
-        prev = L;
-      });
-      if (em > widest) widest = em;
-    });
-    return widest * b.size > avail ? Math.max(8, Math.floor(avail / widest)) : b.size;
-  }
+    // ---- selection: anchor and moving end, always on cluster boundaries
+    function selAF() {
+      var s = ta.selectionStart, e = ta.selectionEnd, d = ed.sel;
+      if (s === e) return [s, s];
+      if (d && Math.min(d[0], d[1]) === s && Math.max(d[0], d[1]) === e) return d;
+      return ta.selectionDirection === 'backward' ? [e, s] : [s, e];
+    }
+    function setSel(a, f) {
+      ed.sel = [a, f]; ed.lastF = f; ed.wantScroll = true;
+      ta.setSelectionRange(Math.min(a, f), Math.max(a, f), f < a ? 'backward' : 'forward');
+      queue();
+    }
+    function snapTo(o, dir) {
+      var lay = ed.lay;
+      if (lay.pos[o]) return o;
+      var st = lay.stops, i = lowerIdx(st, o);
+      return dir > 0 && i + 1 < st.length ? st[i + 1] : st[i];
+    }
+    function snapSel() {
+      var lay = ed.lay;
+      if (!lay || lay.text !== ta.value) return;
+      var s = ta.selectionStart, e = ta.selectionEnd, s2, e2, af = selAF();
+      if (s === e) s2 = e2 = snapTo(s, s >= ed.lastF ? 1 : -1);
+      else { s2 = snapTo(s, -1); e2 = snapTo(e, 1); }
+      if (s2 !== s || e2 !== e) {
+        var back = af[1] < af[0];
+        ta.setSelectionRange(s2, e2, back ? 'backward' : 'forward');
+        ed.sel = s2 === e2 ? null : back ? [e2, s2] : [s2, e2];
+      }
+      ed.lastF = selAF()[1];
+    }
+    ed.syncSel = function () { if (!ed.composing && ed.lay && ed.lay.text === ta.value) snapSel(); queue(); };
+    function stepStop(o, dir) {
+      var st = ed.lay.stops, i = lowerIdx(st, o);
+      if (dir > 0) { if (st[i] <= o) i++; return st[Math.min(i, st.length - 1)]; }
+      if (st[i] === o) i--;
+      return st[Math.max(i, 0)];
+    }
+    function nearestOn(ln, x) {
+      var best = ln.stops[0][0], bd = Infinity;
+      for (var i = 0; i < ln.stops.length; i++) {
+        var d = Math.abs(Math.min(ln.stops[i][1], ed.lay.maxW) - x);
+        if (d < bd) { bd = d; best = ln.stops[i][0]; }
+      }
+      return best;
+    }
+    function moveH(dir, shift) {
+      var af = selAF(), s = ta.selectionStart, e = ta.selectionEnd;
+      var to = !shift && s !== e ? (dir > 0 ? e : s) : stepStop(af[1], dir);
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = null;
+    }
+    // up / down go to the rendered line above / below, keeping the column
+    function moveV(dir, shift) {
+      var af = selAF(), s = ta.selectionStart, e = ta.selectionEnd, lay = ed.lay;
+      var p = locate(!shift && s !== e ? (dir < 0 ? s : e) : af[1]), li = p[0] + dir, to;
+      if (ed.goalX == null) ed.goalX = Math.min(p[1], lay.maxW);
+      if (li < 0) to = 0;
+      else if (li >= lay.lines.length) to = lay.text.length;
+      else to = nearestOn(lay.lines[li], ed.goalX);
+      var gx = ed.goalX;
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = gx;
+    }
+    function lineEdge(end, shift) {
+      var af = selAF(), st = ed.lay.lines[locate(af[1])[0]].stops, to = end ? st[st.length - 1][0] : st[0][0];
+      setSel(shift ? af[0] : to, to);
+      ed.goalX = null;
+    }
+    // the word (or run of spaces) at a boundary; before: the one to its left
+    function wordAt(o, before) {
+      var toks = ed.lay.toks, n = toks.length;
+      if (!n) return [0, 0];
+      var i = o >= ed.lay.text.length ? n - 1 : lowerIdx(toks, o, 'o0');
+      if (before && i > 0 && toks[i].o0 === o && toks[i - 1].t !== 'br') i--;
+      var kind = toks[i].t, a = i, z = i;
+      if (kind === 'br') return [o, o];
+      while (a > 0 && toks[a - 1].t === kind) a--;
+      while (z < n - 1 && toks[z + 1].t === kind) z++;
+      return [toks[a].o0, toks[z].o1];
+    }
+    function paraAt(o) {
+      var t = ed.lay.text, z = t.indexOf('\n', o);
+      return [t.lastIndexOf('\n', o - 1) + 1, z < 0 ? t.length : z];
+    }
+    // a pointer position -> the nearest boundary on the nearest rendered line
+    function hit(cx, cy) {
+      var lay = current(), r = surface.getBoundingClientRect(), x = cx - r.left, y = cy - r.top;
+      var li = ed.L > 0 ? Math.floor((y - ed.padTop) / ed.L) : 0;
+      li = Math.max(0, Math.min(lay.lines.length - 1, li));
+      return { o: nearestOn(lay.lines[li], x), x: x };
+    }
+    function unitAt(h, mode) {
+      if (mode === 'word') return wordAt(h.o, h.x < locate(h.o)[1]);
+      if (mode === 'para') return paraAt(h.o);
+      return [h.o, h.o];
+    }
+    function focusQuiet() {
+      if (document.activeElement === ta) return;
+      ed.placing = true;
+      try { ta.focus({ preventScroll: true }); } finally { ed.placing = false; }
+    }
+    ed.focusAt = function (s, e, dir) {
+      focusQuiet();
+      current();
+      ta.setSelectionRange(s, e, dir === 'backward' ? 'backward' : 'forward');
+      ed.sel = null; ed.lastF = dir === 'backward' ? s : e;
+      snapSel();
+      ed.wantScroll = true;
+      overlay();
+    };
 
-  function fillText(holder, text, size, tr) {
-    var k = size / MET.em, space = wordEm() * size + tr * size;
-    text.split(/\s+/).forEach(function (chunk) {
-      if (!chunk) return;
-      var word = document.createElement('span');
-      word.className = 'word';
-      var prev = null;
-      GC.clusters(chunk).forEach(function (L) {
-        var el;
-        if (canDraw(L)) {
-          if (!FLAT[L]) ensureDef(L);
-          el = glyphSvg(L, size, 'text');
-          if (prev) el.style.marginLeft = (kernOf(prev, L) * k + tr * size).toFixed(2) + 'px';
-          prev = L;
-        } else {
-          el = notdefSvg(size);
-          if (prev) el.style.marginLeft = (tr * size).toFixed(2) + 'px';
-          prev = null;
+    // ---- pointer: a click anywhere in the block below its controls places
+    // the caret, drag selects, double-click a word, triple-click the line;
+    // Shift+click extends
+    var inHead = function (t) { return t && t.closest && !!t.closest('.tester-head'); };
+    // A right-click keeps the text focused and opens the textarea's own
+    // menu (Cut / Copy / Paste / Select all on the selection): the
+    // textarea is slipped under the pointer until the menu is up. A
+    // right-click outside the selection first moves the caret there (on a
+    // Mac, selects the word there, as Mac text fields do).
+    function endCtx() {
+      if (!ed.ctx) return;
+      ed.ctx = null; ta.classList.remove('is-ctx');
+      overlay();
+    }
+    function startCtx(e) {
+      var wasIn = document.activeElement === ta, h = hit(e.clientX, e.clientY), s = ta.selectionStart, z = ta.selectionEnd;
+      focusQuiet();
+      if (!wasIn || s === z || h.o < s || h.o > z) {
+        var w = IS_MAC ? unitAt(h, 'word') : [h.o, h.o];
+        setSel(w[0], w[1]); ed.moved = true;
+      }
+      var r = surface.getBoundingClientRect();
+      ed.ctx = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection]; ta.classList.add('is-ctx');
+      ta.style.left = (e.clientX - r.left - 12).toFixed(1) + 'px';
+      ta.style.top = (e.clientY - r.top - 12).toFixed(1) + 'px';
+    }
+    root.addEventListener('contextmenu', function () {
+      var c = ed.ctx;
+      if (!c) return;
+      // the browser may have moved the textarea's own selection to whatever
+      // of its (unseen) text is under the pointer: the menu acts on ours
+      if (ta.selectionStart !== c[0] || ta.selectionEnd !== c[1]) ta.setSelectionRange(c[0], c[1], c[2]);
+      setTimeout(endCtx, 0);
+    });
+    // the scroller the specimen moves in (the page itself on a phone)
+    function scrollerOf() {
+      var sc = $('specimenScroll');
+      return sc && sc.scrollHeight > sc.clientHeight + 1 && getComputedStyle(sc).overflowY !== 'visible'
+        ? sc : document.scrollingElement || document.documentElement;
+    }
+    root.addEventListener('mousedown', function (e) {
+      if (inHead(e.target)) return;
+      endCtx();
+      if (e.button !== 0) {
+        if (e.button === 2) startCtx(e);
+        else if (e.button === 1 && document.activeElement === ta) e.preventDefault();   // the selection stays
+        if (e.button === 2) e.preventDefault();
+        return;
+      }
+      e.preventDefault();   // focus stays in the textarea, no page text selection
+      var wasIn = document.activeElement === ta, h = hit(e.clientX, e.clientY);
+      var af = selAF(), mode = e.detail >= 3 ? 'para' : e.detail === 2 ? 'word' : 'char', A;
+      focusQuiet();
+      if (e.shiftKey && wasIn) { A = [af[0], af[0]]; mode = 'char'; setSel(af[0], h.o); }
+      else { A = unitAt(h, mode); setSel(A[0], A[1]); }
+      ed.moved = true; ed.goalX = null; ed.wantScroll = false;
+      // a drag held at the top or bottom edge of the view scrolls it, and
+      // the selection follows
+      var last = null, sc = scrollerOf(), tick = 0;
+      var extend = function () {
+        var r = unitAt(hit(last.clientX, last.clientY), mode);
+        if (r[0] < A[0]) setSel(A[1], r[0]); else setSel(A[0], Math.max(A[1], r[1]));
+        ed.wantScroll = false;
+      };
+      var edge = function () {
+        tick = 0;
+        if (!last) return;
+        var page = sc === document.scrollingElement || sc === document.documentElement;
+        var rr = page ? { top: 0, bottom: innerHeight } : sc.getBoundingClientRect(), zone = 30, y = last.clientY;
+        var d = y < rr.top + zone ? y - rr.top - zone : y > rr.bottom - zone ? y - rr.bottom + zone : 0;
+        if (!d) return;
+        var before = sc.scrollTop;
+        sc.scrollTop = before + Math.max(-48, Math.min(48, d / 2));   // faster the further past the edge
+        if (sc.scrollTop === before) return;
+        extend();
+        tick = requestAnimationFrame(edge);
+      };
+      var move = function (ev) {
+        last = ev; extend();
+        if (!tick) tick = requestAnimationFrame(edge);
+      };
+      var up = function () {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (tick) cancelAnimationFrame(tick);
+        tick = 0; last = null;
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    // after Esc the block itself has focus: Enter goes back into its text
+    root.addEventListener('keydown', function (e) {
+      if (e.target !== root || e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      ed.focusAt(ta.selectionStart, ta.selectionEnd, ta.selectionDirection);
+    });
+    // a tap where no mouse events follow still lands the caret
+    root.addEventListener('click', function (e) {
+      if (document.activeElement === ta || inHead(e.target)) return;
+      var h = hit(e.clientX, e.clientY);
+      ed.focusAt(h.o, h.o);
+      ed.moved = true;
+    });
+
+    // ---- keys: only what the drawn layout has to answer; the rest is native
+    ta.addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;   // the IME's keys
+      endCtx();
+      var k = e.key, mod = e.ctrlKey || e.metaKey, plain = !mod && !e.altKey;
+      if (k === 'Escape' || (k === 'Enter' && mod)) {   // leave the text, onto the block itself
+        e.preventDefault();
+        root.focus({ preventScroll: true });
+        if (document.activeElement === ta) ta.blur();
+        return;
+      }
+      if (mod && !e.altKey && (k === 'a' || k === 'A')) ed.moved = true;   // select all: what you type next is its own step
+      var horiz = k === 'ArrowLeft' || k === 'ArrowRight', vert = k === 'ArrowUp' || k === 'ArrowDown';
+      var edge = k === 'Home' || k === 'End';
+      if (!horiz && !vert && !edge && k !== 'PageUp' && k !== 'PageDown') return;
+      current();
+      ed.moved = true;
+      if (horiz && plain) moveH(k === 'ArrowRight' ? 1 : -1, e.shiftKey);
+      else if (vert && plain) moveV(k === 'ArrowDown' ? 1 : -1, e.shiftKey);
+      else if (edge && !mod) lineEdge(k === 'End', e.shiftKey);
+      else if (horiz && IS_MAC && e.metaKey && !e.ctrlKey && !e.altKey) lineEdge(k === 'ArrowRight', e.shiftKey);
+      else {   // word jumps, start / end of the text: native, then snapped to a cluster boundary
+        ed.goalX = null; ed.wantScroll = true;
+        setTimeout(ed.syncSel, 0);
+        return;
+      }
+      e.preventDefault();
+    });
+    ta.addEventListener('keyup', ed.syncSel);
+    ta.addEventListener('select', ed.syncSel);
+    ta.addEventListener('selectionchange', ed.syncSel);
+
+    // ---- editing
+    // what this block may grow to: its cap, and what the other blocks leave
+    // of the budget (never below what it already holds, so it can shrink)
+    function capText() { ta.maxLength = Math.max(ta.value.length, Math.min(BLOCK_MAX, TEXT_BUDGET - previewChars(b))); }
+    ta.addEventListener('beforeinput', function (e) {
+      var it = e.inputType || '';
+      if (it === 'historyUndo' || it === 'historyRedo') {   // Edit › Undo, shake to undo: the app's history
+        e.preventDefault();
+        if (it === 'historyUndo') undo(); else redo();
+        return;
+      }
+      endCtx();
+      // its own undo step: a paste or cut, or typing over a selection
+      // (after Ctrl/⌘A, a drag, a double-click)
+      if (/Paste|Drop|Cut|Yank/.test(it) || (!ed.composing && ta.selectionStart !== ta.selectionEnd)) ed.moved = true;
+      // the textarea's maxLength is this block's share of the preview budget
+      // (refreshed here: an undo may have changed the other blocks since focus)
+      capText();
+      if (/^insert/.test(it) && it !== 'insertCompositionText' && ta.maxLength > 0) {
+        var add = e.data != null ? e.data.length : e.dataTransfer ? (e.dataTransfer.getData('text/plain') || '').length : 1;
+        if (ta.value.length - (ta.selectionEnd - ta.selectionStart) + add > ta.maxLength) {
+          toast('Preview text is full: ' + BLOCK_MAX.toLocaleString('en') + ' characters a block, ' + TEXT_BUDGET.toLocaleString('en') + ' in all', 3200);
         }
-        word.appendChild(el);
-      });
-      word.style.marginRight = space.toFixed(2) + 'px';
-      holder.appendChild(word);
-      holder.appendChild(document.createTextNode('​'));
+      }
     });
+    ta.addEventListener('input', function (e) {
+      var it = e.inputType || '';
+      if (it === 'historyUndo' || it === 'historyRedo') {   // a native undo slipped past beforeinput:
+        ta.value = b.text;                                   // drop it and use the app's history
+        if (it === 'historyUndo') undo(); else redo();
+        return;
+      }
+      if (ta.value === b.text) { queue(); return; }
+      // one undo step per typing burst; the snapshot still holds the old text
+      var now = Date.now();
+      if (!ed.burst || ed.moved || (!ed.composing && now - ed.lastEdit > BURST_MS)) pushUndo();
+      ed.burst = true; ed.moved = /Paste|Drop|Cut|Yank/.test(it); ed.lastEdit = now;
+      b.text = ta.value;
+      ed.sel = null; ed.wantScroll = true; ed.goalX = null;
+      queue(true);
+      markDirty();
+      clearTimeout(ed.missT);
+      ed.missT = setTimeout(function () { reportMissing(b.text); }, 1200);   // once typing pauses
+    });
+    ta.addEventListener('compositionstart', function () {
+      if (ta.selectionStart !== ta.selectionEnd) ed.moved = true;   // composing over a selection: a new step
+      ed.composing = true; ed.compStart = ta.selectionStart; ed.compLen = 0;
+    });
+    ta.addEventListener('compositionupdate', function (e) { ed.compLen = (e.data || '').length; queue(); });
+    ta.addEventListener('compositionend', function () { ed.composing = false; ed.compLen = 0; queue(true); });
+
+    ta.addEventListener('focus', function () {
+      activeEd = ed; ed.focused = true;
+      capText();
+      surface.classList.add('is-focused');
+      // Tab lands at the end of the text; a click or a window coming back
+      // keeps the caret it set or had
+      if (!ed.placing && !ed.winBlur) { var n = ta.value.length; ta.setSelectionRange(n, n); ed.sel = null; ed.lastF = n; }
+      ed.winBlur = false; ed.burst = false; ed.goalX = null; ed.wantScroll = !ed.placing;
+      queue();
+    });
+    ta.addEventListener('blur', function () {
+      endCtx();
+      ed.winBlur = typeof document.hasFocus === 'function' && !document.hasFocus();
+      if (activeEd === ed) activeEd = null;
+      ed.focused = false; ed.composing = false; ed.burst = false;
+      surface.classList.remove('is-focused');
+      clearTimeout(ed.missT);
+      if (!ed.winBlur) reportMissing(b.text);
+      queue();
+    });
+    return ed;
   }
 
+  // what the font can't draw yet, one entry per grapheme (a flag, not its two halves)
   function missingIn(text) {
-    var miss = [];
-    GC.clusters(text).forEach(function (L) {
-      if (/^\s$/.test(L) || canDraw(L) || miss.indexOf(L) >= 0) return;
-      miss.push(L);
+    var miss = [], units = graphemeStarts(text) ? Array.from(SEG.segment(text), function (x) { return x.segment; }) : null;
+    (units || GC.clusters(text)).forEach(function (u) {
+      if (/^\s+$/.test(u)) return;
+      var cl = units ? GC.clusters(u) : [u];
+      if (cl.every(canDraw)) return;
+      var L = cl.join('');
+      if (miss.indexOf(L) < 0) miss.push(L);
     });
     return miss;
   }
+  var lastMissing = '';
   function reportMissing(text) {
     var miss = missingIn(text).join(' ');
     if (miss && miss !== lastMissing) toast('Not in this font yet: ' + miss, 3200);
     lastMissing = miss;
   }
 
+  // re-layout every block; widths are read first so the reads don't
+  // interleave with the writes
   function repaintAllTesters() {
-    var roots = testerList.querySelectorAll('.tester');
-    for (var i = 0; i < roots.length; i++) {
-      if (!state.blocks[i].editing) paintText(roots[i], state.blocks[i]);
-    }
+    var eds = [];
+    Array.prototype.forEach.call(testerList.children, function (r) { if (r.liquidEd) eds.push(r.liquidEd); });
+    var ws = eds.map(function (ed) { return ed.surface.clientWidth; });
+    eds.forEach(function (ed, i) { ed.paint(ws[i]); });
   }
 
   // ------------------------------------------------------------- glyph set
@@ -3667,7 +5259,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // structural edits undo as cleanly as drags), plus the shape, spacing and
   // accent settings and the preview blocks — anything a click can lose.
   function blocksData() {
-    return state.blocks.map(function (b) { return { text: b.text, size: b.size, lh: b.lh, tr: b.tr, paper: b.paper }; });
+    return state.blocks.map(function (b) { return { id: b.id, text: b.text, size: b.size, lh: b.lh, tr: b.tr, paper: b.paper }; });
   }
   function snapshot() {
     var sh = {};
@@ -3689,11 +5281,33 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
       for (var k in o.lay) GC.LAYOUT[k] = o.lay[k];
       syncShape();
     }
-    if (o.blocks && JSON.stringify(o.blocks) !== JSON.stringify(blocksData())) {
-      state.blocks = o.blocks.map(function (b) { return block(b.text, b.size, b.lh, b.tr, b.paper); });
-      renderTesters();
-    }
+    if (o.blocks && JSON.stringify(o.blocks) !== JSON.stringify(blocksData())) restoreBlocks(o.blocks);
     bumpAll();
+  }
+  // Blocks are matched by id and updated in place. When only text changed
+  // (undoing a typing burst) every block keeps its DOM, so the textarea you
+  // are typing in stays the focused element and the caret lands where the
+  // undone edit was; a block put back or taken away rebuilds the list,
+  // which refocuses the block you were in by its id.
+  function restoreBlocks(data) {
+    var byId = {}, sameSet = data.length === state.blocks.length;
+    state.blocks.forEach(function (b) { byId[b.id] = b; });
+    data.forEach(function (d, i) { if (!state.blocks[i] || state.blocks[i].id !== d.id) sameSet = false; });
+    var textOnly = sameSet && data.every(function (d, i) {
+      var b = state.blocks[i];
+      return d.size === b.size && d.lh === b.lh && d.tr === b.tr && !!d.paper === b.paper;
+    });
+    if (textOnly) {
+      data.forEach(function (d, i) { var b = state.blocks[i]; if (b.text !== d.text) setBlockText(b, d.text); });
+      return;
+    }
+    state.blocks = data.map(function (d) {
+      var b = d.id > 0 && byId[d.id];
+      if (!b) return block(d.text, d.size, d.lh, d.tr, d.paper, d.id);
+      b.text = d.text; b.size = d.size; b.lh = d.lh; b.tr = d.tr; b.paper = !!d.paper;
+      return b;
+    });
+    renderTesters();
   }
   function pushUndo() {
     undoStack.push(snapshot());
@@ -3703,6 +5317,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
   function undo() {
     if (!undoStack.length) return;
+    if (activeEd) activeEd.burst = false;   // the next keystroke in a preview starts a new step
     redoStack.push(snapshot());
     restore(undoStack.pop());
     if (state.activeNode >= viewNodes(viewOf(state.selected)).length) state.activeNode = -1;
@@ -3710,6 +5325,7 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   }
   function redo() {
     if (!redoStack.length) return;
+    if (activeEd) activeEd.burst = false;
     undoStack.push(snapshot());
     restore(redoStack.pop());
     schedule(); markDirty();
@@ -3924,16 +5540,23 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     return true;
   }
   document.addEventListener('keydown', function (e) {
+    if (e.isComposing || e.keyCode === 229) return;   // keys an IME is using
     // only text-like fields keep their own keys; a slider, select or button
-    // that still has focus must not swallow Ctrl/⌘Z
+    // that still has focus must not swallow Ctrl/⌘Z. Preview text is typed
+    // into a textarea too, so none of the editor's keys fire there — but its
+    // undo is the app's (one step per typing burst), never the textarea's.
     var t = e.target, typing = t && (t.tagName === 'TEXTAREA' || t.isContentEditable ||
       (t.tagName === 'INPUT' && /^(text|number|search|email|url|tel|password)$/.test(t.type)));
+    var preview = !!(t && t.classList && t.classList.contains('tester-input'));
     var mod = e.metaKey || e.ctrlKey, k = e.key;
     if (mod && (k === 'z' || k === 'Z')) {
-      if (typing) return;   // native undo inside text fields
+      if (typing && !preview) return;   // native undo inside the other text fields
       e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
     }
-    if (mod && (k === 'y' || k === 'Y')) { e.preventDefault(); redo(); return; }
+    if (mod && (k === 'y' || k === 'Y')) {
+      if (typing && !preview) return;
+      e.preventDefault(); redo(); return;
+    }
     if (mod && (k === 's' || k === 'S')) { e.preventDefault(); saveProjectFile(); return; }
     if (mod && (k === 'o' || k === 'O')) { e.preventDefault(); $('projectFile').click(); return; }
     if (typing || mod) return;
@@ -4018,6 +5641,9 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   bindShape('sldMelt', 'valMelt', 'melt', null);
   bindShape('sldTension', 'valTension', 'tension', f1);
   bindShape('sldWobble', 'valWobble', 'wobble', f1);
+  var pct = function (v) { return Math.round(v * 100) + '%'; };
+  bindShape('sldFlow', 'valFlow', 'flow', pct);
+  bindShape('sldDrip', 'valDrip', 'drip', pct);
   bindShape('sldSmooth', 'valSmooth', 'smooth', null);
   bindRange('sldSpacing', 'valSpacing', function () { return state.spacing; },
     function (v) { state.spacing = v; }, f1, false);
@@ -4066,10 +5692,11 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   });
 
   $('btnAddBlock').addEventListener('click', function () {
+    if (!roomFor(1, 17)) return;
     pushUndo();
     var nb = block('NEW PREVIEW BLOCK', 120, 120, 0.01);
     state.blocks.push(nb);
-    renderTesters(nb); markDirty();
+    renderTesters(nb, 'type'); markDirty();   // focused with its text selected: just type
   });
   // proofing strings a type designer reaches for
   var PROOFS = {
@@ -4079,12 +5706,13 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     pangram: 'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789',
   };
   $('proofSelect').addEventListener('change', function (e) {
-    var v = e.target.value, t = PROOFS[v];
+    var v = e.target.value, t = PROOFS[v], WF = 'ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026';
     e.target.value = '';
+    if (v === 'waterfall' ? !roomFor(4, 4 * WF.length) : t && !roomFor(1, t.length)) return;
     if (v) pushUndo();
     if (v === 'waterfall') {
       // one line at falling sizes: where the melt stops reading
-      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block('ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026', sz, 145, 0.01)); });
+      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block(WF, sz, 145, 0.01)); });
       renderTesters(); markDirty(); $('specimenScroll').scrollTop = 0;
       return;
     }
@@ -4120,6 +5748,8 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     $('sldMelt').value = state.melt; $('valMelt').textContent = state.melt;
     $('sldTension').value = state.tension; $('valTension').textContent = f1(state.tension);
     $('sldWobble').value = state.wobble; $('valWobble').textContent = f1(state.wobble);
+    $('sldFlow').value = state.flow; $('valFlow').textContent = Math.round(state.flow * 100) + '%';
+    $('sldDrip').value = state.drip; $('valDrip').textContent = Math.round(state.drip * 100) + '%';
     $('sldSmooth').value = state.smooth; $('valSmooth').textContent = state.smooth;
     $('sldSpacing').value = state.spacing; $('valSpacing').textContent = f1(state.spacing);
     $('sldKern').value = state.kern; $('valKern').textContent = Math.round(state.kern * 100) + '%';
@@ -4170,12 +5800,21 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // The whole project autosaves to this browser, and can be saved to /
   // opened from a .liquid.json file. `chains` carries every skeleton with the
   // edits applied, which is what the Poster tool reads.
+  // #saveState is a polite live region: it speaks only when the outcome
+  // changes, once things settle ('Saved in browser', 'Not saved'). Pending
+  // work only dims it (a class, which a screen reader doesn't announce), so
+  // typing in a preview or nudging a node is never read out key by key.
   var dirtyT = null;
+  function sayState(t) { var el = $('saveState'); if (el.textContent !== t) el.textContent = t; }
   function markDirty() {
     clearTimeout(dirtyT);
-    $('saveState').textContent = 'Saving…';
+    $('saveState').classList.add('is-saving');
     dirtyT = setTimeout(autosave, 500);
   }
+  // leaving or hiding the tab writes what is still waiting
+  function flushSave() { if (dirtyT) { clearTimeout(dirtyT); autosave(); } }
+  window.addEventListener('pagehide', flushSave);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushSave(); });
   function projectData() {
     var shape = {}, chains = {};
     SHAPE_KEYS.forEach(function (k) { shape[k] = state[k]; });
@@ -4192,10 +5831,12 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     };
   }
   function autosave() {
+    dirtyT = null;
+    $('saveState').classList.remove('is-saving');
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(projectData()));
-      $('saveState').textContent = 'Saved in browser';
-    } catch (e) { $('saveState').textContent = 'Not saved'; }
+      sayState('Saved in browser');
+    } catch (e) { sayState('Not saved'); }
   }
   function num(v, lo, hi, d) { v = +v; return isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; }
   function validFlat(f) {
@@ -4221,7 +5862,8 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   // Ranges are the sliders' own, so a hand-edited or hostile file can't push
   // the engine somewhere it never goes (smooth 100 froze the tab, res < 0
   // blanked every glyph).
-  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3] };
+  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3],
+    flow: [0, 1], warp: [0, 1], neck: [0, 1], sag: [0, 1], drip: [0, 1], dripForm: [0, 1], stretch: [1, 3] };
   // Validate everything into a staging object first; nothing is touched
   // unless the whole file passes, so a rejected Open leaves no trace.
   function parseProject(p) {
@@ -4265,9 +5907,12 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     q.globalExempt = Object.create(null);
     if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (hasB(k)) q.globalExempt[k] = true; });
     if (Array.isArray(p.blocks)) {
-      var budget = 20000;   // total preview text: a 200k-character file would freeze the tab
-      q.blocks = p.blocks.slice(0, 40).map(function (b) {
-        var t = String((b && b.text) || '').slice(0, Math.max(0, Math.min(5000, budget)));
+      // total preview text: a 200k-character file would freeze the tab.
+      // The same caps the editor keeps to (BLOCK_MAX, TEXT_BUDGET +
+      // FIXED_SLACK, MAX_BLOCKS), so an autosave always comes back whole.
+      var budget = TEXT_BUDGET + FIXED_SLACK;
+      q.blocks = p.blocks.slice(0, MAX_BLOCKS).map(function (b) {
+        var t = String((b && b.text) || '').replace(/\r\n?/g, '\n').slice(0, Math.max(0, Math.min(BLOCK_MAX, budget)));
         budget -= t.length;
         return block(t, num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);
       });
@@ -4323,31 +5968,16 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
   });
 
   // ----------------------------------------------------------------- exports
-  // Lay a block out the same way the preview does: em-sized glyphs, measured
-  // spacing, kerning, tracking, word wrap at maxW. Returns placed glyphs.
+  // A block laid out exactly as its preview is (layoutText: same clusters,
+  // spacing, kerning, tracking, spaces and line breaks), wrapped at maxW.
+  // the preview's own layout and fit rule, at the export's column width
   function layoutBlock(b, maxW) {
-    var k = b.size / MET.em, trk = b.tr * b.size, space = wordEm() * b.size + trk;
-    var lines = [[]], x = 0, lineW = [0];
-    b.text.split(/\s+/).forEach(function (chunk) {
-      if (!chunk) return;
-      var word = [], wx = 0, prev = null;
-      GC.clusters(chunk).forEach(function (L) {
-        if (!canDraw(L)) {   // the same dashed box the preview shows
-          if (prev || word.length) wx += trk;
-          word.push({ notdef: true, x: wx, w: 0.42 * b.size });
-          wx += 0.42 * b.size; prev = null; return;
-        }
-        if (prev) wx += kernOf(prev, L) * k + trk;
-        var s = spacingOf(L);
-        word.push({ L: L, x: wx, s: s });
-        wx += s.adv * k; prev = L;
-      });
-      if (!word.length) return;
-      if (x > 0 && x + wx > maxW) { lines.push([]); lineW.push(0); x = 0; }
-      word.forEach(function (g) { g.x += x; lines[lines.length - 1].push(g); });
-      x += wx; lineW[lineW.length - 1] = x; x += space;
-    });
-    return { lines: lines, widths: lineW, k: k };
+    var lay = layoutText(b.text, b.size, b.tr, maxW, true);
+    return {
+      lines: lay.lines.map(function (l) { return l.glyphs; }),
+      widths: lay.lines.map(function (l) { return l.w; }),
+      k: lay.k, size: lay.size,
+    };
   }
   // The whole specimen as one SVG: every block in its own size, leading,
   // tracking and ink/paper colours, glyphs referenced from shared defs.
@@ -4356,18 +5986,18 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     var bg = state.ink === '#000000' ? '#ffffff' : '#000000';
     var blocks = state.blocks.length ? state.blocks : [block(state.fontName.toUpperCase(), 160, 110, 0.01)];
     blocks.forEach(function (b) {
-      var lay = layoutBlock(b, inner), lh = b.lh / 100 * b.size, top = y;
-      var h = pad * 0.6 + (ASC_EM - CAP_EM) * b.size + lay.lines.length * lh + DESC_EM * b.size + pad * 0.6;
+      var lay = layoutBlock(b, inner), sz = lay.size, lh = b.lh / 100 * sz, top = y;
+      var h = pad * 0.6 + (ASC_EM - CAP_EM) * sz + lay.lines.length * lh + DESC_EM * sz + pad * 0.6;
       var ink = b.paper ? '#000000' : (state.ink === '#000000' ? '#000' : state.ink);
       if (b.paper) body += '<rect x="0" y="' + top.toFixed(1) + '" width="' + W + '" height="' + h.toFixed(1) + '" fill="#ffffff"/>';
-      var baseline = top + pad * 0.6 + (ASC_EM - CAP_EM) * b.size + CAP_EM * b.size + (lh - b.size) / 2;
+      var baseline = top + pad * 0.6 + (ASC_EM - CAP_EM) * sz + CAP_EM * sz + (lh - sz) / 2;
       body += '<g fill="' + ink + '">';
       lay.lines.forEach(function (line, li) {
         var by = baseline + li * lh;
         line.forEach(function (g) {
           if (g.notdef) {
-            body += '<rect x="' + (pad + g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - CAP_EM * b.size).toFixed(1) + '" width="' + (g.w * 0.8).toFixed(1) +
-              '" height="' + (CAP_EM * b.size).toFixed(1) + '" rx="3" fill="none" stroke="' + ink + '" stroke-width="2" stroke-dasharray="6 4"/>';
+            body += '<rect x="' + (pad + g.x + g.w * 0.1).toFixed(1) + '" y="' + (by - CAP_EM * sz).toFixed(1) + '" width="' + (g.w * 0.8).toFixed(1) +
+              '" height="' + (CAP_EM * sz).toFixed(1) + '" rx="3" fill="none" stroke="' + ink + '" stroke-width="2" stroke-dasharray="6 4"/>';
             return;
           }
           used[g.L] = 1;
@@ -4601,7 +6231,18 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     kern: function (a, b) { return kernOf(a, b); },
     spacing: function (L) { var s = spacingOf(L); return { lsb: s.lsb, rsb: s.rsb, adv: s.adv, x0: s.x0, x1: s.x1 }; },
     metrics: function () { return { base: MET.base, cap: MET.cap, em: MET.em, ascender: ASC_EM, descender: DESC_EM }; },
+    // the text of each laid-out line, as the previews and exports break it
+    layout: function (text, size, maxW) {
+      text = String(text);
+      var l = layoutText(text, size || 100, 0, maxW || Infinity, true);
+      return l.lines.map(function (ln) { return text.slice(ln.o0, ln.o1); });
+    },
     glyphs: function () { return LETTERS.concat(VIET, LATIN); },
+    rings: function (L) { return ringsOf(L); },
+    // counters: rings wound against the outer shells (see ringsFromField), with their areas
+    holes: function (L) {
+      return ringsOf(L).map(BlobEngine.signedArea).filter(function (a) { return a < 0; }).map(function (a) { return -a; });
+    },
     // true 2D distance between the inks of a set pair, glyph units (tests)
     pairGap: function (a, b) {
       var A = spacingOf(a), B = spacingOf(b), shift = A.adv + kernOf(a, b) - (B.x0 - B.lsb) + (A.x0 - A.lsb);
