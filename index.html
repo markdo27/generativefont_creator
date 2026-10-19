@@ -5735,13 +5735,20 @@ var GLYPH_DATA = {"H": 100, "W": 92, "glyphs": {"A": [[[40, -2, 11], [27, 44, 11
     state.presetEdited = true;
     syncPresetLabel();
   }
+  // An edited state is marked with a star, not " (edited)": the wider label
+  // widened the select, which wrapped the control bar onto a second row at
+  // laptop widths and yanked the slider you were dragging out from under the
+  // pointer. Screen readers still hear "(edited)".
   function syncPresetLabel() {
     var sel = $('presetSelect');
     Array.prototype.forEach.call(sel.options, function (o) {
       var base = o.value.charAt(0).toUpperCase() + o.value.slice(1);
-      o.textContent = base + (o.value === state.preset && state.presetEdited ? ' (edited)' : '');
+      var ed = o.value === state.preset && state.presetEdited;
+      o.textContent = base + (ed ? ' *' : '');
+      if (ed) o.setAttribute('aria-label', base + ' (edited)'); else o.removeAttribute('aria-label');
     });
     sel.value = state.preset;
+    sel.title = state.presetEdited ? 'Edited since you picked this flow state' : '';
   }
   function syncShape() {
     $('sldMass').value = state.mass; $('valMass').textContent = f2(state.mass);
