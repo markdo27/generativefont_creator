@@ -92,6 +92,13 @@ html, body {
 .project-group { display: flex; gap: 6px; }
 .project-group .text-btn { padding: 6px 9px; }
 .save-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* unsaved work: a dot before the label (drawn, never read out — the live
+   region's text only changes once a save settles, app.js markDirty) */
+.save-state::before {
+  content: ''; display: inline-block; width: 0; height: 0; margin: 0 7px 1px 0; vertical-align: middle;
+  border: 2.5px solid currentColor; border-radius: 50%; opacity: 0; transition: opacity var(--t) var(--ease);
+}
+.save-state.is-saving::before { opacity: 1; }
 .fontname-input:hover, .fontname-input:focus { background: #1b1b1b; }
 .topbar-spacer { flex: 1; }
 .topbar-meta {
@@ -364,16 +371,16 @@ html, body {
 /* ---------------------------------------------------------------- controls */
 .control-bar {
   border-top: 1px solid var(--line); background: var(--surface);
-  padding: 12px 18px; display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  padding: 12px 18px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
 }
-.slider-group { display: flex; flex-direction: column; gap: 5px; width: 80px; }
-.control-cluster { display: flex; gap: 14px; align-items: flex-end; }
+.slider-group { display: flex; flex-direction: column; gap: 5px; width: 72px; }
+.control-cluster { display: flex; gap: 12px; align-items: flex-end; }
 .slider-group label {
-  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.08em;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--muted);
-  display: flex; justify-content: space-between;
+  display: flex; justify-content: space-between; gap: 4px; white-space: nowrap;
 }
-.slider-group label b { color: var(--fg); font-weight: 600; }
+.slider-group label b { color: var(--fg); font-weight: 600; letter-spacing: 0; }
 
 input[type="range"] {
   -webkit-appearance: none; appearance: none;

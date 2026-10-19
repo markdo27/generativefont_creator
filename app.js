@@ -13,7 +13,10 @@
     bubble:  { mass: 0.94, melt:  7, tension: -7, wobble: 0,   grain: 0.045, smooth: 2, res: 1.6 },
     goo:     { mass: 1.10, melt: 20, tension:  0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
   };
-  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
+  // flow and drip have sliders; warp, neck, sag, dripForm and stretch are the
+  // Flow preset's own liquid physics and travel with the project
+  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res',
+    'flow', 'warp', 'neck', 'sag', 'drip', 'dripForm', 'stretch'];
 
   // preview inks, a tonal ramp; black flips the previews to paper
   var PALETTE = ['#ffffff', '#c4c4c4', '#8a8a8a', '#000000'];
@@ -110,7 +113,8 @@
   }
   function shapeKey() {
     var s = state, L = GC.LAYOUT;
-    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res, s.seed, s.draft ? 'd' : '',
+    return [s.mass, s.melt, s.tension, s.wobble, s.grain, s.smooth, s.res,
+      s.flow, s.warp, s.neck, s.sag, s.drip, s.dripForm, s.stretch, s.seed, s.draft ? 'd' : '',
       L.scale, L.gapTop, L.gapStack, L.gapBottom].join('|');
   }
   function verOf(L) { return (isMark(L) ? 0 : globalVer) + '.' + letterVer[L]; }
@@ -125,18 +129,35 @@
     var t = Object.prototype.hasOwnProperty.call(TUNE, key) && TUNE[key];
     return state.melt * (t && t.melt > 0 ? t.melt : 1);
   }
-  function traceChains(chains, key, tag) {
-    var k = 't|' + key + '|' + tag;
+  // Drips hang only from letters and figures: never from a mark, a dot or
+  // punctuation, nor from a letter carrying a mark below it (noDrip), whose
+  // dot or cedilla would land in the drip.
+  function dripsFor(key, noDrip) {
+    return noDrip || !(ALNUM.test(key) || OWN_CAPS.indexOf(key) >= 0) ? 0 : state.drip;
+  }
+  // Each traced ring set remembers its drip-free foot (the ink bottom with
+  // drips left out), so drips never move the measured baseline.
+  var FOOT = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function footOf(rings) {
+    var f = FOOT && FOOT.get(rings), b = GC.bbox(rings);
+    return f != null ? f : (b ? b[3] : null);
+  }
+  function traceChains(chains, key, tag, noDrip) {
+    var k = 't|' + key + '|' + tag + (noDrip ? '|nd' : '');
     if (cache[k]) return cache[k];
     var r;
     try {
-      r = BlobEngine.glyphRings(GC.markChains(key, chains), GC.traceOpts(key, {
+      var t = BlobEngine.glyphTrace(GC.markChains(key, chains), GC.traceOpts(key, {
         mass: state.mass, melt: meltFor(key), tension: state.tension, wobble: state.wobble,
         grain: state.grain, smooth: state.smooth, simplify: 0.3,
+        flow: state.flow, warp: state.warp, neck: state.neck, sag: state.sag,
+        drip: dripsFor(key, noDrip), dripForm: state.dripForm, stretch: state.stretch,
         // while a slider is being dragged, trace coarser and refine on release
         res: state.draft ? state.res * 1.7 : state.res,
         seed: state.seed + key.charCodeAt(0) * 13,
       }));
+      r = t.rings;
+      if (FOOT && t.foot != null) FOOT.set(r, t.foot);
     } catch (e) { console.error('glyph failed', key, e); r = []; }
     return remember(k, r);
   }
@@ -146,9 +167,13 @@
     var tag = shapeKey() + '@' + [p.base].concat(p.fused, p.top, p.bottom).map(verOf).join(',');
     var k = 'c|' + L + '|' + tag;
     if (cache[k]) return cache[k];
+    var below = p.bottom.length > 0;   // a dot below / cedilla: the base must not drip into it
     return remember(k, GC.compose(L, {
-      rings: ringsOf, chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
-      trace: function (ch, key) { return traceChains(ch, key, tag); },
+      rings: function (key) {
+        return below && key === p.base && FLAT[key] ? traceChains(chainsOf(key), key, shapeKey() + '@' + verOf(key), true) : ringsOf(key);
+      },
+      chains: chainsOf, lines: function () { return { cap: MET.cap, foot: MET.base }; },
+      trace: function (ch, key) { return traceChains(ch, key, tag, below); },
     }, hasKey));
   }
   function ringsOf(L) {
@@ -205,7 +230,7 @@
   function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
   function measureMetrics() {
     var bot = [], top = [];
-    Array.from('HIELNMKTFZ').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) bot.push(b[3]); });
+    Array.from('HIELNMKTFZ').forEach(function (L) { var f = FLAT[L] && footOf(ringsOf(L)); if (f != null && f !== false) bot.push(f); });
     Array.from('HIETFZBDPRKL').forEach(function (L) { var b = FLAT[L] && GC.bbox(ringsOf(L)); if (b) top.push(b[1]); });
     MET.base = bot.length ? median(bot) : GH;
     MET.cap = top.length ? median(top) : 0;
@@ -357,8 +382,23 @@
   // block that comes back is the same block (and keeps its caret) — never
   // "whichever block now sits in that position"
   var uid = 0;
-  // preview text caps: per block, and in all (what a project file keeps)
-  var BLOCK_MAX = 5000, TEXT_BUDGET = 20000;
+  // Preview caps, one set for everything: typing stops at BLOCK_MAX a block
+  // and TEXT_BUDGET in all; Add block and the proofs may put their short
+  // fixed strings on top, up to FIXED_SLACK more, and at most MAX_BLOCKS
+  // blocks. A project file (and the autosave) keeps exactly that much, so
+  // whatever you can make here comes back whole after a reload.
+  var BLOCK_MAX = 5000, TEXT_BUDGET = 20000, FIXED_SLACK = 2000, MAX_BLOCKS = 40;
+  function previewChars(but) {
+    var n = 0;
+    state.blocks.forEach(function (x) { if (x !== but) n += x.text.length; });
+    return n;
+  }
+  // room for n more blocks holding `chars` characters of fixed text
+  function roomFor(n, chars) {
+    if (state.blocks.length + n > MAX_BLOCKS) { toast('That makes more than ' + MAX_BLOCKS + ' preview blocks — remove one first', 3200); return false; }
+    if (previewChars() + chars > TEXT_BUDGET + FIXED_SLACK) { toast('Preview text is full — shorten a block first', 3200); return false; }
+    return true;
+  }
   function block(text, size, lh, tr, paper, id) {
     if (id > uid) uid = id;
     return { id: id > 0 ? id : ++uid, text: text, size: size, lh: lh, tr: tr, paper: !!paper };
@@ -678,7 +718,18 @@
     // (moving the focused one would blur it)
     kids.forEach(function (r) { if (next.indexOf(r) < 0) testerList.removeChild(r); });
     next.forEach(function (r, i) { if (testerList.children[i] !== r) testerList.insertBefore(r, testerList.children[i] || null); });
-    if (was && was.root.parentNode !== testerList) { activeEd = null; was = null; }
+    var landing = null, lost = false;
+    if (was && was.root.parentNode !== testerList) {
+      // the block you were typing in went away (an undo took it back): focus
+      // lands on the nearest block that is still there — the block itself,
+      // not its text, so the next key edits nothing — and never on <body>,
+      // where the keyboard would lose its place
+      var at = kids.indexOf(was.root);
+      for (var d = 1; !landing && d < kids.length; d++) {
+        [kids[at + d], kids[at - d]].forEach(function (r) { if (!landing && r && r.parentNode === testerList) landing = r; });
+      }
+      activeEd = null; was = null; lost = true;
+    }
     if (!state.blocks.length) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
@@ -700,6 +751,8 @@
       ed = was;
       if (ed.b.text === wasText) ed.focusAt(wasSel[0], wasSel[1], wasSel[2]);
       else { var c = changedEnd(wasText, ed.b.text); ed.focusAt(c, c); }
+    } else if (lost) {   // (no block left: the Add block button)
+      (landing || $('btnAddBlock')).focus({ preventScroll: true });
     }
   }
   // each preview's textarea gets its own name, so a screen reader can tell
@@ -1314,6 +1367,9 @@
     ta.addEventListener('selectionchange', ed.syncSel);
 
     // ---- editing
+    // what this block may grow to: its cap, and what the other blocks leave
+    // of the budget (never below what it already holds, so it can shrink)
+    function capText() { ta.maxLength = Math.max(ta.value.length, Math.min(BLOCK_MAX, TEXT_BUDGET - previewChars(b))); }
     ta.addEventListener('beforeinput', function (e) {
       var it = e.inputType || '';
       if (it === 'historyUndo' || it === 'historyRedo') {   // Edit › Undo, shake to undo: the app's history
@@ -1326,6 +1382,8 @@
       // (after Ctrl/⌘A, a drag, a double-click)
       if (/Paste|Drop|Cut|Yank/.test(it) || (!ed.composing && ta.selectionStart !== ta.selectionEnd)) ed.moved = true;
       // the textarea's maxLength is this block's share of the preview budget
+      // (refreshed here: an undo may have changed the other blocks since focus)
+      capText();
       if (/^insert/.test(it) && it !== 'insertCompositionText' && ta.maxLength > 0) {
         var add = e.data != null ? e.data.length : e.dataTransfer ? (e.dataTransfer.getData('text/plain') || '').length : 1;
         if (ta.value.length - (ta.selectionEnd - ta.selectionStart) + add > ta.maxLength) {
@@ -1361,9 +1419,7 @@
 
     ta.addEventListener('focus', function () {
       activeEd = ed; ed.focused = true;
-      var others = 0;   // what the other blocks leave of the budget a project file keeps
-      state.blocks.forEach(function (x) { if (x !== b) others += x.text.length; });
-      ta.maxLength = Math.max(ta.value.length, Math.min(BLOCK_MAX, TEXT_BUDGET - others));
+      capText();
       surface.classList.add('is-focused');
       // Tab lands at the end of the text; a click or a window coming back
       // keeps the caret it set or had
@@ -2137,6 +2193,9 @@
   bindShape('sldMelt', 'valMelt', 'melt', null);
   bindShape('sldTension', 'valTension', 'tension', f1);
   bindShape('sldWobble', 'valWobble', 'wobble', f1);
+  var pct = function (v) { return Math.round(v * 100) + '%'; };
+  bindShape('sldFlow', 'valFlow', 'flow', pct);
+  bindShape('sldDrip', 'valDrip', 'drip', pct);
   bindShape('sldSmooth', 'valSmooth', 'smooth', null);
   bindRange('sldSpacing', 'valSpacing', function () { return state.spacing; },
     function (v) { state.spacing = v; }, f1, false);
@@ -2185,6 +2244,7 @@
   });
 
   $('btnAddBlock').addEventListener('click', function () {
+    if (!roomFor(1, 17)) return;
     pushUndo();
     var nb = block('NEW PREVIEW BLOCK', 120, 120, 0.01);
     state.blocks.push(nb);
@@ -2198,12 +2258,13 @@
     pangram: 'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789',
   };
   $('proofSelect').addEventListener('change', function (e) {
-    var v = e.target.value, t = PROOFS[v];
+    var v = e.target.value, t = PROOFS[v], WF = 'ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026';
     e.target.value = '';
+    if (v === 'waterfall' ? !roomFor(4, 4 * WF.length) : t && !roomFor(1, t.length)) return;
     if (v) pushUndo();
     if (v === 'waterfall') {
       // one line at falling sizes: where the melt stops reading
-      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block('ĐẸP QUÁ, TIẾNG VIỆT! AV LT 2026', sz, 145, 0.01)); });
+      [18, 28, 44, 72].forEach(function (sz) { state.blocks.unshift(block(WF, sz, 145, 0.01)); });
       renderTesters(); markDirty(); $('specimenScroll').scrollTop = 0;
       return;
     }
@@ -2239,6 +2300,8 @@
     $('sldMelt').value = state.melt; $('valMelt').textContent = state.melt;
     $('sldTension').value = state.tension; $('valTension').textContent = f1(state.tension);
     $('sldWobble').value = state.wobble; $('valWobble').textContent = f1(state.wobble);
+    $('sldFlow').value = state.flow; $('valFlow').textContent = Math.round(state.flow * 100) + '%';
+    $('sldDrip').value = state.drip; $('valDrip').textContent = Math.round(state.drip * 100) + '%';
     $('sldSmooth').value = state.smooth; $('valSmooth').textContent = state.smooth;
     $('sldSpacing').value = state.spacing; $('valSpacing').textContent = f1(state.spacing);
     $('sldKern').value = state.kern; $('valKern').textContent = Math.round(state.kern * 100) + '%';
@@ -2289,11 +2352,15 @@
   // The whole project autosaves to this browser, and can be saved to /
   // opened from a .liquid.json file. `chains` carries every skeleton with the
   // edits applied, which is what the Poster tool reads.
+  // #saveState is a polite live region: it speaks only when the outcome
+  // changes, once things settle ('Saved in browser', 'Not saved'). Pending
+  // work only dims it (a class, which a screen reader doesn't announce), so
+  // typing in a preview or nudging a node is never read out key by key.
   var dirtyT = null;
+  function sayState(t) { var el = $('saveState'); if (el.textContent !== t) el.textContent = t; }
   function markDirty() {
     clearTimeout(dirtyT);
-    var el = $('saveState');   // a live region: say it once per burst, not on every key
-    if (el.textContent !== 'Saving…') el.textContent = 'Saving…';
+    $('saveState').classList.add('is-saving');
     dirtyT = setTimeout(autosave, 500);
   }
   // leaving or hiding the tab writes what is still waiting
@@ -2317,10 +2384,11 @@
   }
   function autosave() {
     dirtyT = null;
+    $('saveState').classList.remove('is-saving');
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(projectData()));
-      $('saveState').textContent = 'Saved in browser';
-    } catch (e) { $('saveState').textContent = 'Not saved'; }
+      sayState('Saved in browser');
+    } catch (e) { sayState('Not saved'); }
   }
   function num(v, lo, hi, d) { v = +v; return isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; }
   function validFlat(f) {
@@ -2346,7 +2414,8 @@
   // Ranges are the sliders' own, so a hand-edited or hostile file can't push
   // the engine somewhere it never goes (smooth 100 froze the tab, res < 0
   // blanked every glyph).
-  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3] };
+  var SHAPE_RANGE = { mass: [0.6, 1.5], melt: [0, 40], tension: [-12, 8], wobble: [0, 8], grain: [0.01, 0.2], smooth: [0, 4], res: [1.2, 3],
+    flow: [0, 1], warp: [0, 1], neck: [0, 1], sag: [0, 1], drip: [0, 1], dripForm: [0, 1], stretch: [1, 3] };
   // Validate everything into a staging object first; nothing is touched
   // unless the whole file passes, so a rejected Open leaves no trace.
   function parseProject(p) {
@@ -2391,10 +2460,10 @@
     if (p.globalExempt && typeof p.globalExempt === 'object') Object.keys(p.globalExempt).forEach(function (k) { if (hasB(k)) q.globalExempt[k] = true; });
     if (Array.isArray(p.blocks)) {
       // total preview text: a 200k-character file would freeze the tab.
-      // Typing stops at TEXT_BUDGET; the slack is for the short fixed
-      // strings Add block and the proofs put on top of a full budget.
-      var budget = TEXT_BUDGET + 2000;
-      q.blocks = p.blocks.slice(0, 40).map(function (b) {
+      // The same caps the editor keeps to (BLOCK_MAX, TEXT_BUDGET +
+      // FIXED_SLACK, MAX_BLOCKS), so an autosave always comes back whole.
+      var budget = TEXT_BUDGET + FIXED_SLACK;
+      q.blocks = p.blocks.slice(0, MAX_BLOCKS).map(function (b) {
         var t = String((b && b.text) || '').replace(/\r\n?/g, '\n').slice(0, Math.max(0, Math.min(BLOCK_MAX, budget)));
         budget -= t.length;
         return block(t, num(b && b.size, 10, 480, 96), num(b && b.lh, 70, 220, 120), num(b && b.tr, -0.06, 0.4, 0.01), b && b.paper);

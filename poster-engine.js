@@ -40,7 +40,25 @@
     bubble: { mass: 0.94, melt: 7, tension: -7, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
     goo: { mass: 1.10, melt: 20, tension: 0, wobble: 3.6, grain: 0.070, smooth: 3, res: 1.5 },
   };
-  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'];
+  // flow and drip have sliders; warp, neck, sag, dripForm and stretch are the
+  // Flow preset's own liquid physics (0 = off where a table doesn't name them)
+  var FLOW_KEYS = ['flow', 'warp', 'neck', 'sag', 'drip', 'dripForm', 'stretch'];
+  var SHAPE_KEYS = ['mass', 'melt', 'tension', 'wobble', 'grain', 'smooth', 'res'].concat(FLOW_KEYS);
+  // a shape saved before the flow keys existed takes them from its preset
+  function fillFlowKeys(sh, presetName) {
+    var p = typeof presetName === 'string' && hasOwn(presetTable(), presetName) ? presetTable()[presetName] : {};
+    FLOW_KEYS.forEach(function (k) { if (!finite(sh[k])) sh[k] = finite(p[k]) ? p[k] : k === 'stretch' ? 1 : k === 'dripForm' ? 0.5 : 0; });
+    return sh;
+  }
+  // the stock letter shape: the liquid preset, every key filled (a key the
+  // table lacks is off, 0, except stretch and dripForm's neutral values)
+  function stockGlyph() {
+    var lp = presetTable().liquid || {}, fb = GLYPH_PRESETS.liquid, g = { preset: 'liquid' };
+    SHAPE_KEYS.forEach(function (k) {
+      g[k] = finite(lp[k]) ? lp[k] : finite(fb[k]) ? fb[k] : k === 'stretch' ? 1 : k === 'dripForm' ? 0.5 : 0;
+    });
+    return g;
+  }
   function presetTable() {
     return (typeof BlobEngine !== 'undefined' && BlobEngine.PRESETS) || GLYPH_PRESETS;
   }
@@ -150,7 +168,7 @@
 
   var state = {
     fontSource: DEFAULTS.fontSource, uploadedFont: null, uploadedFontName: '',
-    glyph: { preset: 'liquid', mass: 1.00, melt: 15, tension: -4, wobble: 0, grain: 0.045, smooth: 2, res: 1.6 },
+    glyph: stockGlyph(),
 
     bigRows: defaultRows(),
     smallBlocks: defaultBlocks(),
@@ -218,6 +236,7 @@
   var SHAPE_LIMITS = {
     mass: [0.3, 3], melt: [0, 80], tension: [-40, 40], wobble: [0, 20],
     grain: [0.001, 0.5], smooth: [0, 6], res: [0.8, 4],
+    flow: [0, 1], warp: [0, 1], neck: [0, 1], sag: [0, 1], drip: [0, 1], dripForm: [0, 1], stretch: [1, 3],
   };
   var MARK_LIMITS = { scale: [0.5, 1.6], gapTop: [0, 30], gapStack: [0, 30], gapBottom: [0, 30] };  // as the Font tool clamps them
 
@@ -274,7 +293,7 @@
       SHAPE_KEYS.forEach(function (k) {
         if (finite(p.shape[k])) { sh[k] = clampTo(p.shape[k], SHAPE_LIMITS[k]); nShape++; }
       });
-      if (nShape) out.shape = sh;
+      if (nShape) out.shape = fillFlowKeys(sh, p.preset);
     }
     if (p.marks && typeof p.marks === 'object') {
       var mk2 = {}, nMarks = 0;
@@ -318,7 +337,8 @@
   function glyphKey() {
     var g = state.glyph;
     var lay = GC ? Object.keys(GC.LAYOUT).map(function (k) { return GC.LAYOUT[k]; }).join(':') : '';
-    return [srcVer, linked() ? 1 : 0, g.mass, g.melt, g.tension, g.wobble, g.grain, g.smooth, g.res, glyphSeed(), lay].join(',');
+    return [srcVer, linked() ? 1 : 0, g.mass, g.melt, g.tension, g.wobble, g.grain, g.smooth, g.res,
+      g.flow, g.warp, g.neck, g.sag, g.drip, g.dripForm, g.stretch, glyphSeed(), lay].join(',');
   }
   function cachePut(key, v) {
     if (Object.keys(builtinCache).length > 700) builtinCache = {};
@@ -339,33 +359,48 @@
     }
     return 1;
   }
-  function traceOptsFor(k) {
+  // Drips hang only from letters and figures (as in the Font tool): never
+  // from a mark, a dot or punctuation, nor from a letter that carries a mark
+  // below it (noDrip), whose dot or cedilla would land in the drip.
+  function traceOptsFor(k, noDrip) {
     var g = state.glyph;
     var o = {
       mass: g.mass, melt: g.melt * meltFactor(k), tension: g.tension, wobble: g.wobble,
       grain: g.grain, smooth: g.smooth, res: g.res || 1.6, simplify: 0.3,
+      flow: g.flow || 0, warp: g.warp || 0, neck: g.neck || 0, sag: g.sag || 0,
+      drip: noDrip || !/^(?:[A-Z0-9]|\p{Lu})$/u.test(k) ? 0 : g.drip || 0,
+      dripForm: finite(g.dripForm) ? g.dripForm : 0.5, stretch: g.stretch || 1,
       seed: glyphSeed() + k.charCodeAt(0) * 13,
     };
     return GC ? GC.traceOpts(k, o) : o;
   }
+  // each traced ring set remembers its drip-free foot, so drips never move
+  // the measured foot line (fontLines)
+  var FOOT = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function traceTo(chains, k, noDrip) {
+    var t = BlobEngine.glyphTrace ? BlobEngine.glyphTrace(chains, traceOptsFor(k, noDrip))
+      : { rings: BlobEngine.glyphRings(chains, traceOptsFor(k, noDrip)), foot: null };
+    if (FOOT && t.foot != null) FOOT.set(t.rings, t.foot);
+    return t.rings;
+  }
   // A glyph or mark traced in its own space. Floating marks go through
   // markChains (global accent size) and traceOpts (gentler melt/tension).
-  function builtinRings(k) {
-    var key = 'g:' + k + '@' + glyphKey();
+  function builtinRings(k, noDrip) {
+    var key = 'g:' + k + '@' + glyphKey() + (noDrip ? '|nd' : '');
     if (hasOwn(builtinCache, key)) return builtinCache[key];
     var ch = chainsOf(k), r = [];
     if (ch) {
-      try { r = BlobEngine.glyphRings(GC ? GC.markChains(k, ch) : ch, traceOptsFor(k)); }
+      try { r = traceTo(GC ? GC.markChains(k, ch) : ch, k, noDrip); }
       catch (e) { console.error('glyph failed', k, e); r = []; }
     }
     return cachePut(key, r);
   }
   // Base + fused marks (horn, Đ bar) traced as one melted field.
-  function traceAs(chains, k) {
-    var key = 't:' + k + '@' + glyphKey();
+  function traceAs(chains, k, noDrip) {
+    var key = 't:' + k + '@' + glyphKey() + (noDrip ? '|nd' : '');
     if (hasOwn(builtinCache, key)) return builtinCache[key];
     var r;
-    try { r = BlobEngine.glyphRings(chains, traceOptsFor(k)); }
+    try { r = traceTo(chains, k, noDrip); }
     catch (e) { console.error('glyph failed', k, e); r = []; }
     return cachePut(key, r);
   }
@@ -379,8 +414,10 @@
     var edge = function (letters, i) {
       var out = [];
       Array.from(letters).forEach(function (k) {
-        var b = hasGlyph(k) && GC.bbox(builtinRings(k));
-        if (b) out.push(b[i]);
+        var r = hasGlyph(k) && builtinRings(k), b = r && GC.bbox(r);
+        if (!b) return;
+        var f = i === 3 && FOOT ? FOOT.get(r) : null;
+        out.push(f != null ? f : b[i]);
       });
       return out;
     };
@@ -412,13 +449,14 @@
     var key = 'c:' + c + '@' + glyphKey();
     if (hasOwn(builtinCache, key)) return builtinCache[key];
     var out = null, traced = null, seen = {};
+    var plan = GC.plan(c, hasGlyph), below = !!(plan && plan.bottom && plan.bottom.length);
     // compose() passes the base rings through as-is and builds every placed
     // accent fresh, so ring identity tells them apart; record exactly the
-    // arrays it was handed
+    // arrays it was handed. A mark below means a drip-free base.
     var api = {
-      rings: function (k) { return (seen[k] = builtinRings(k)); },
+      rings: function (k) { return (seen[k] = builtinRings(k, below && plan && k === plan.base)); },
       chains: composeApi.chains, lines: composeApi.lines,
-      trace: function (ch, k) { return (traced = traceAs(ch, k)); },
+      trace: function (ch, k) { return (traced = traceAs(ch, k, below)); },
     };
     try {
       var comp = GC.compose(c, api, hasGlyph);
@@ -2531,6 +2569,8 @@
     ['glyphMelt', 'valGlyphMelt', 'melt', function (v) { return Math.round(v); }],
     ['glyphTension', 'valGlyphTension', 'tension', function (v) { return v.toFixed(1); }],
     ['glyphWobble', 'valGlyphWobble', 'wobble', function (v) { return v.toFixed(1); }],
+    ['glyphFlow', 'valGlyphFlow', 'flow', function (v) { return Math.round(v * 100) + '%'; }],
+    ['glyphDrip', 'valGlyphDrip', 'drip', function (v) { return Math.round(v * 100) + '%'; }],
   ];
   function syncGlyphSliders() {
     GLYPH_FIELDS.forEach(function (f) {
@@ -2703,7 +2743,7 @@
       if (n) {
         var pr = p.glyph.preset;
         g.preset = typeof pr === 'string' && hasOwn(presetTable(), pr) ? pr : 'custom';
-        out.glyph = g;
+        out.glyph = fillFlowKeys(g, pr);
       }
     }
     if (p.link && typeof p.link === 'object') out.link = { use: p.link.use !== false, shape: p.link.shape !== false };
@@ -3023,9 +3063,7 @@
     state.selected = null;
     restoredFontName = '';
     // stock letter shape, and the Font-tool link back on (its default)
-    var lp = presetTable().liquid || {};
-    state.glyph = { preset: 'liquid' };
-    SHAPE_KEYS.forEach(function (k) { state.glyph[k] = finite(lp[k]) ? lp[k] : GLYPH_PRESETS.liquid[k]; });
+    state.glyph = stockGlyph();
     link.use = true; link.shape = true; link.saved = null;
     // stock accent spacing too, so applyLinkShape parks the stock values (not
     // a previous project's) for when the user opts out of the match
